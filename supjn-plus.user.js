@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SuPJN+ - Consulta Web del PJN ampliada
 // @namespace    ignacio.kinbaum
-// @version      0.2.4
+// @version      0.2.6
 // @description  Una sola ventana sobre la Consulta Web del PJN: Mis causas y Favoritos, en trámite y fuera de trámite, con búsqueda, filtros, orden y columnas movibles; etiquetas y anotaciones propias con respaldo manual; dejar nota en todas o en las seleccionadas; bajar expedientes en PDF eligiendo causas desde la lista o actuaciones desde el expediente; y acceso a las demás funciones del PJN.
 // @author       Ignacio Kinbaum
 // @license      GPL-3.0-or-later
@@ -129,7 +129,7 @@
 
   const APP = {
     nombre: 'SuPJN+',
-    version: 'beta 0.2.4',
+    version: 'beta 0.2.6',
     autor: 'Ignacio Kinbaum',
     anio: '2026',
     mail: 'estudiojuridicokinbaum@gmail.com',
@@ -222,6 +222,16 @@
   }
   const soloFecha = (ms) => fechaHora(ms).slice(0, 10);
   const diasDesde = (ms) => Math.floor((Date.now() - ms) / 86400000);
+  // "recién", "hace 20 minutos", "hace 3 horas", "hace 2 días"
+  function hace(ms) {
+    const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+    if (s < 90) return 'recién';
+    const m = Math.round(s / 60);
+    if (m < 60) return 'hace ' + plural(m, 'minuto', 'minutos');
+    const h = Math.round(m / 60);
+    if (h < 24) return 'hace ' + plural(h, 'hora', 'horas');
+    return 'hace ' + plural(Math.round(h / 24), 'día', 'días');
+  }
   const hoyISO = () => { const d = new Date(); return d.getFullYear() + '-' + dos(d.getMonth() + 1) + '-' + dos(d.getDate()); };
   // Con la fecha local: en UTC, después de las 21 el archivo salía con la de mañana.
   const selloArchivo = () => hoyISO();
@@ -251,26 +261,48 @@
   // ------------------------------------------------------------------ partes
   //
   // De la lista, el PJN manda la carátula y nada más: no manda los
-  // intervinientes. La carátula del PJN viene armada como
-  // "ACTORA C/ DEMANDADA S/ OBJETO", así que de ahí salen las partes sin pedirle
-  // nada más. Cuando no hay "C/" queda una sola parte y el rol se deduce del
-  // objeto y del fuero: sucesión es causante y un fuero penal es imputado.
-  // Esto es lo que se lee de la carátula; los roles de verdad están en la
-  // solapa Intervinientes de cada expediente.
+  // intervinientes. Pero la carátula suele traer los roles escritos
+  // ("IMPUTADO: X S/ROBO DAMNIFICADO: Y", "ACTOR: A DEMANDADO: B S/DAÑOS"), y
+  // cuando no los trae viene armada como "ACTORA C/ DEMANDADA S/ OBJETO". De
+  // ahí salen las partes sin pedirle nada más al PJN. Los roles de verdad están
+  // en la solapa Intervinientes de cada expediente.
 
-  // Solo los fueros que son penales enteros. Los federales de provincia y el
-  // civil y comercial federal tienen de todo (ciudadanías, amparos, ejecuciones):
-  // ahí la carátula no alcanza para decir que alguien es imputado.
+  // Roles que el PJN escribe en la carátula. Los letrados y demás no aparecen ahí.
+  // Ojo con las terminaciones: IMPUTADA? solo toma "IMPUTAD" o "IMPUTADA", no
+  // "IMPUTADO". Por eso van con [OA].
+  const ROL_CARATULA = /\b(ACTORA?|DEMANDAD[OA]|IMPUTAD[OA]|DENUNCIANTE|DENUNCIAD[OA]|DAMNIFICAD[OA]|V[IÍ]CTIMA|QUERELLANTE|CAUSANTE|TERCERO|SOLICITANTE|PETICIONANTE|EJECUTANTE|EJECUTAD[OA]|CONCURSAD[OA]|FALLID[OA]|DEUDORA?|ACREEDORA?)\s*:\s*/gi;
   const FUEROS_PENALES = ['CCC', 'CFP', 'CPE'];
   const OBJETO_PENAL = /\b(robo|hurto|estafa|defraudaci|homicidio|lesiones|amenazas|encubrimiento|tenencia|portaci|abuso|usurpaci|incendio|estupefacientes|infraccion(es)? ley|averiguaci[oó]n de delito|delito)\b/i;
+
+  // "IMPUTADO" -> "Imputado", "VICTIMA" -> "Víctima"
+  const nombreRol = (r) => {
+    const x = limpio(r).toLowerCase();
+    const y = x.charAt(0).toUpperCase() + x.slice(1);
+    return y === 'Victima' ? 'Víctima' : y;
+  };
 
   function partesDeCaratula(exp, car) {
     const t = limpio(car).replace(/\s+/g, ' ');
     if (!t) return [];
-    // El objeto va después de "S/" (o "s/"), tomando el primero.
+    // 1. Si la carátula trae los roles escritos, se usan tal cual.
+    const marcas = [];
+    ROL_CARATULA.lastIndex = 0;
+    let m;
+    while ((m = ROL_CARATULA.exec(t)) !== null) marcas.push({ rol: m[1], ini: m.index, fin: m.index + m[0].length });
+    if (marcas.length) {
+      const out = [];
+      marcas.forEach((x, i) => {
+        const hasta = i + 1 < marcas.length ? marcas[i + 1].ini : t.length;
+        // El objeto empieza en " S/" y no es parte del nombre.
+        const nombre = t.slice(x.fin, hasta).split(/\s+S\//i)[0].replace(/\s*[-–]\s*$/, '').trim();
+        if (nombre) out.push({ rol: nombreRol(x.rol), nombre });
+      });
+      if (out.length) return out;
+    }
+    // 2. Si no, "ACTORA C/ DEMANDADA S/ OBJETO".
     const cortar = (s) => {
-      const m = /\s+S\/\s*/i.exec(s);
-      return m ? [s.slice(0, m.index).trim(), s.slice(m.index + m[0].length).trim()] : [s.trim(), ''];
+      const c = /\s+S\/\s*/i.exec(s);
+      return c ? [s.slice(0, c.index).trim(), s.slice(c.index + c[0].length).trim()] : [s.trim(), ''];
     };
     const mc = /\s+(?:C\/|CONTRA)\s+/i.exec(t);
     if (mc) {
@@ -278,6 +310,7 @@
       const der = cortar(t.slice(mc.index + mc[0].length));
       return [{ rol: 'Actora', nombre: izq }, { rol: 'Demandada', nombre: der[0] }].filter((x) => x.nombre);
     }
+    // 3. Una sola parte: el rol se deduce del objeto y del fuero.
     const uno = cortar(t);
     if (!uno[0]) return [];
     const objeto = uno[1];
@@ -609,7 +642,10 @@
       filasDe(doc).forEach((f) => {
         if (vistos[f.exp]) return;
         vistos[f.exp] = true;
-        out.push({ exp: f.exp, dep: f.dep, car: f.car, sit: f.sit, ult: f.ult, fav: f.fav, pag });
+        // pos: el lugar que ocupa en la lista del PJN. Con la misma fecha, el PJN
+        // ordena por la hora de la última actuación, que no muestra: copiar su orden
+        // es la única forma de desempatar igual que él.
+        out.push({ exp: f.exp, dep: f.dep, car: f.car, sit: f.sit, ult: f.ult, fav: f.fav, pag, pos: out.length });
       });
       avisar('Leyendo ' + que + ': página ' + pag + ' (' + plural(out.length, 'causa', 'causas') + ')');
       const sig = enlaceSiguiente(doc);
@@ -649,7 +685,7 @@
       const deTramite = {};
       tramite.forEach((f) => { deTramite[f.exp] = f; });
       const causas = (todas || tramite).map((f) => ({
-        exp: f.exp, dep: f.dep, car: f.car, sit: f.sit, ult: f.ult,
+        exp: f.exp, dep: f.dep, car: f.car, sit: f.sit, ult: f.ult, pos: f.pos,
         fav: tipo === 'fav' ? true : f.fav,
         tramite: todas ? !!deTramite[f.exp] : true,
         pagTodas: todas ? f.pag : null,
@@ -660,7 +696,7 @@
         causas.forEach((c) => { enTodas[c.exp] = true; });
         tramite.forEach((f) => {
           if (enTodas[f.exp]) return;
-          causas.push({ exp: f.exp, dep: f.dep, car: f.car, sit: f.sit, ult: f.ult, fav: tipo === 'fav' ? true : f.fav, tramite: true, pagTodas: null, pagTramite: f.pag });
+          causas.push({ exp: f.exp, dep: f.dep, car: f.car, sit: f.sit, ult: f.ult, pos: todas.length + f.pos, fav: tipo === 'fav' ? true : f.fav, tramite: true, pagTodas: null, pagTramite: f.pag });
         });
       }
       return { fecha: Date.now(), causas, enTramite: causas.filter((c) => c.tramite).length, total: causas.length };
@@ -2023,9 +2059,13 @@
   });
 
   function valorOrden(c, k) {
+    // Sin columna: como vino del PJN (el orden de lectura, que la tabla conserva).
+    if (!k) return '';
     if (k === 'exp') return ordenExp(c.exp);
     if (k === 'partes') { const p = partesDe(c); return norm(p.map((x) => x.nombre).join(' ')); }
-    if (k === 'ult') return String(numFecha(c.ult)).padStart(8, '0');
+    // Con la fecha empatada, se respeta el orden del PJN (que desempata por la
+    // hora, que no muestra). Va invertido porque el orden normal es descendente.
+    if (k === 'ult') return String(numFecha(c.ult)).padStart(8, '0') + '|' + String(999999 - (c.pos || 0)).padStart(6, '0');
     if (k === 'et') return norm(etiquetasDe(c.exp).map((e) => e.nom).join(' '));
     if (k === 'anot') return norm(marcaDe(c.exp).nota);
     if (k === 'nota') { const n = NOTAS[c.exp]; return n ? n.f + (n.ok === true ? '2' : n.ok === null ? '1' : '0') : ''; }
@@ -2173,6 +2213,8 @@
     '.sj-rol{color:#6b7c85;font-size:11px;text-transform:uppercase;letter-spacing:.02em}',
     '.sj-sep{color:#b9c6cc;margin:0 5px}',
     '.sj-exp-cab .c .p{margin-top:2px;font-size:12.5px;color:#24414f}',
+    '.sj-leido{color:#3a4c54}',
+    '.sj-leido.vieja{color:#b3261e;font-weight:600}',
     '.sj-res{font-size:11.5px;font-weight:600;white-space:nowrap}',
     '.sj-res.ok{color:#1b6b3a}',
     '.sj-res.mal{color:#b3261e}',
@@ -2380,15 +2422,29 @@
     q('[data-f="texto"]').value = CFG.texto;
     q('[data-f="desde"]').value = CFG.desde;
     q('[data-f="hasta"]').value = CFG.hasta;
+    pintarOrdenPJN();
+  }
+
+  // El PJN no avisa cuando algo cambia: lo que se ve es la última lectura. Por eso
+  // la antigüedad va a la vista, y en rojo cuando ya pasó el rato.
+  function pintarOrdenPJN() {
+    const b = q('[data-e="ordenPJN"]');
+    if (b) b.classList.toggle('prim', !CFG.orden.col);
   }
 
   function pintarEstado() {
     if (leyendo) return;
+    const e = q('[data-e="estado"]');
+    if (!e) return;
     const D = datosVista();
     const L = LISTAS[VISTA === 'fav' ? 'fav' : 'rel'];
     if (!D) { estadoTxt('Todavía no se leyó ' + L.nombre + '.'); return; }
     const fuera = D.total - D.enTramite;
-    estadoTxt(plural(D.total, 'causa', 'causas') + ' (' + D.enTramite + ' en trámite, ' + fuera + ' fuera de trámite) · leídas el ' + fechaHora(D.fecha));
+    const vieja = Date.now() - D.fecha > VIEJA_DESPUES_DE;
+    e.innerHTML = esc(plural(D.total, 'causa', 'causas') + ' (' + D.enTramite + ' en trámite, ' + fuera + ' fuera de trámite) · ') +
+      '<span class="sj-leido' + (vieja ? ' vieja' : '') + '" title="' + esc('Leídas el ' + fechaHora(D.fecha) + '. El PJN no avisa cuando cambia algo: esto es lo que había en esa lectura.') + '">' +
+      esc('leídas ' + hace(D.fecha)) + '</span>' +
+      (vieja ? ' <button class="sj-b chico" data-a="actualizar" title="Volver a leer las listas del PJN">Volver a leer</button>' : '');
   }
 
   function pintarCopia() {
@@ -3237,6 +3293,7 @@
     if (esVistaLista()) {
       pintarFiltros();
       pintarEstado();
+      pintarOrdenPJN();
       pintarBotonesLectura();
       pintarAccion();
       pintarTabla();
@@ -3506,6 +3563,8 @@
     if (!win) return;
     win.style.display = 'flex';
     pastilla.style.display = 'none';
+    // Abrir la ventana es el momento de mirar: si la lectura quedó vieja, se rehace.
+    setTimeout(refrescarSiHaceFalta, 0);
     alertaPastilla = '';
     // Si el navegador cambió de tamaño mientras estaba minimizada.
     acomodarVentana();
@@ -3598,6 +3657,7 @@
       '<label>a <input type="date" data-f="hasta" title="Hasta"></label>' +
       '<button class="sj-b" data-a="limpiar">Limpiar filtros</button>' +
       '<button class="sj-b" data-a="menuCols">Columnas ▾</button>' +
+      '<button class="sj-b" data-a="ordenPJNLista" data-e="ordenPJN" title="Mostrarlas en el mismo orden en que las manda el PJN. Con la fecha empatada, el PJN ordena por la hora de la última actuación, que no muestra en la lista.">Orden del PJN</button>' +
       '</div>' +
       '<div class="sj-est"><span class="txt" data-e="estado"></span>' +
       '<button class="sj-b prim" data-a="actualizar" title="Vuelve a leer Mis causas y Favoritos del PJN">Actualizar</button>' +
@@ -3912,6 +3972,8 @@
       // así redibujar no pisa lo que se anotó en la otra pestaña.
       if (win) win.querySelectorAll('[data-marca] .sj-nota').forEach((t) => { t.value = marcaDe(t.closest('[data-marca]').dataset.marca).nota || ''; });
       if (win && win.style.display !== 'none' && !menuAbierto) pintarTodo();
+      // Al volver a esta pestaña, si las listas quedaron viejas se leen de nuevo.
+      refrescarSiHaceFalta();
     });
 
     // Mientras haya descargas, salir de la página las corta: el navegador avisa.
@@ -4100,6 +4162,14 @@
         repintarTabla(tab);
         return;
       }
+      case 'ordenPJNLista':
+        CFG.orden = { col: '', desc: false };
+        guardarCfg();
+        PAGINA_VISTA.rel = 1;
+        PAGINA_VISTA.fav = 1;
+        pintarTabla();
+        pintarFiltros();
+        return;
       case 'zoomMas': cambiarZoom(zoomVecino(1)); return;
       case 'zoomMenos': cambiarZoom(zoomVecino(-1)); return;
       case 'zoomCien': cambiarZoom(1); return;
@@ -4493,6 +4563,8 @@
 
     if (EN_EXPEDIENTE) leerExpedienteActual().then(refrescarSiHaceFalta);
     else refrescarSiHaceFalta();
+    // El "leídas hace..." tiene que envejecer solo, sin recargar nada.
+    setInterval(() => { if (win && win.style.display !== 'none' && esVistaLista() && !leyendo) pintarEstado(); }, 60000);
   }
 
   // Enganche para las pruebas unitarias. Solo existe en el sitio de pruebas
