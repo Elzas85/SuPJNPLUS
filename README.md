@@ -3,88 +3,101 @@
 Userscript para **Tampermonkey** que reúne, en **una sola ventana**, la
 [Consulta Web del Poder Judicial de la Nación (PJN)](https://scw.pjn.gov.ar/).
 
-Incluye todo **PJN+** y le suma tus causas, tus favoritos, dejar nota y el
-acceso a las demás aplicaciones del PJN, en la misma interfaz.
+Incorpora la totalidad de **PJN+** y agrega las causas propias, los favoritos,
+dejar nota y el acceso a las demás aplicaciones del PJN, en la misma interfaz.
 
 ## Qué hace
 
-Una ventana que **arranca minimizada** (queda la pastilla **SuPJN+** abajo a la
-derecha) y mientras tanto **lee tus causas sola**, en segundo plano. Se puede
-**mover** (arrastrando la barra azul), **agrandar** (desde la esquina de abajo
-a la derecha), **acercar o alejar** (los botones − 100% + de la barra azul) y
-**minimizar, maximizar o cerrar**. Si pasa algo mientras está minimizada, la
-pastilla se pone **roja** y dice que hay un aviso.
+Una ventana que **se inicia minimizada** (queda el indicador **SuPJN+** en el
+extremo inferior derecho) y mientras tanto **lee las causas por sí sola**, en
+segundo plano. Se puede **desplazar** arrastrando la barra azul, **redimensionar**
+desde la esquina inferior derecha, **acercar o alejar** con los botones − 100% +
+de la barra azul, y **minimizar, maximizar o cerrar**. Si ocurre algo mientras
+está minimizada, el indicador se pone **rojo** y señala que hay un aviso.
 
 ### Mis causas y Favoritos
 
 - Lee **las dos listas** del PJN (Relacionados y Favoritos), **en trámite y
-  fuera de trámite**, en segundo plano y sin mover la página que estás viendo.
+  fuera de trámite**, en segundo plano y sin alterar la página que se está
+  viendo.
 - Una sola tabla con **búsqueda** sobre todos los campos y **filtros** por
   fuero, situación, trámite, etiqueta y rango de fechas de la última actuación.
-- **Ordena** por cualquier columna y las **columnas se mueven** (arrastrando el
-  título), se **ensanchan** (arrastrando el borde) y se **ocultan**.
+- **Ordena** por cualquier columna. Las **columnas se reubican** arrastrando el
+  título, se **ensanchan** arrastrando el borde y se **ocultan**.
 - **Orden PJN** las muestra en la misma secuencia que el sitio: al leer, SuPJN+
-  le pide la lista con **"Ordenar Lista Por: FECHA"**, igual que se hace a mano.
+  solicita la lista con **"Ordenar Lista Por: FECHA"**, igual que se hace
+  manualmente.
 - **Orden cronológico** ordena por última actuación. El PJN no publica la hora en
   ninguna pantalla, pero las resoluciones y los escritos van firmados y la firma
-  la lleva: con **Averiguar la hora**, SuPJN+ baja el último documento con PDF de
-  las causas que empatan en la fecha, le lee la hora a la firma y la muestra al
-  lado de la fecha. Va de a cinco causas y hasta quince por vez, y se puede
-  cortar. La hora **desempata solo cuando se la sabe de todas las causas de ese
-  día**: con algunas sabidas y otras no, las sabidas saltarían en bloque y el
-  orden saldría peor que el del PJN, así que en ese caso queda el del PJN.
-- La tabla **entra siempre en el ancho de la ventana**: lo que le das a una
-  columna se lo sacás a las otras. Se saca desde **Columnas ▾**.
-- **Novedades:** el PJN no avisa nada, así que SuPJN+ guarda cómo estaba cada
-  causa la última vez que la miraste y marca con **nuevo** las que cambiaron de
-  fecha de última actuación o de situación. El PJN solo publica el día, así que
-  dos movimientos del mismo día no se distinguen. El botón **Novedades** deja ver
-  solo esas. Una causa deja de estar marcada
-  cuando la abrís, o con **Marcar todo como visto**. La primera lectura es la
-  línea de partida: ahí no hay novedades.
-- **Etiquetas** con color y **apuntes** propios sobre cada causa (los apuntes son notas privadas de trabajo, no tienen nada que ver con dejar nota).
-- Una columna **Partes** con el rol adelante: "Actora: A · Demandada: B". Cuando la carátula no tiene "C/", dice **Causante** en las sucesiones e **Imputado** en lo penal. Sale de la carátula del PJN, que es lo único que manda la lista.
-- Una columna **Nota** que muestra el resultado de la última vez que dejaste
-  nota en cada causa.
+  la contiene: con **Averiguar la hora**, SuPJN+ descarga el último documento con
+  PDF de las causas que empatan en la fecha, lee la hora de la firma y la muestra
+  junto a la fecha. Procesa de a cinco causas, hasta quince por vez, y se puede
+  cancelar. La hora **desempata solo cuando se conoce la de todas las causas de
+  ese día**: con algunas conocidas y otras no, las conocidas se agruparían en
+  bloque y el resultado sería peor que el orden del PJN, de modo que en ese caso
+  se conserva el del sitio.
+- La tabla **siempre entra en el ancho de la ventana**: el espacio que gana una
+  columna lo pierden las otras. El encuadre se desactiva desde **Columnas ▾**.
+- **Novedades:** el PJN no emite aviso alguno, de modo que SuPJN+ registra el
+  estado de cada causa en la última consulta y marca con **nuevo** las que
+  cambiaron de fecha de última actuación o de situación. El sitio solo publica el
+  día, así que dos movimientos de la misma fecha no se distinguen. El botón
+  **Novedades** deja a la vista únicamente esas causas. Una causa deja de estar
+  marcada al abrirla, o con **Marcar todo como visto**. La primera lectura es la
+  línea de partida: allí no hay novedades.
+- **Etiquetas** con color y **anotaciones** propias sobre cada causa. Las
+  anotaciones son notas privadas de trabajo y no guardan relación con dejar nota.
+- Una columna **Partes** con el rol al frente: "Actora: A · Demandada: B". Cuando
+  la carátula no contiene "C/", indica **Causante** en las sucesiones e
+  **Imputado** en el fuero penal. Se obtiene de la carátula del PJN, que es lo
+  único que la lista provee.
+- Una columna **Nota** con el resultado de la última vez que se dejó nota en cada
+  causa.
 
 ### Dejar nota
 
-- Tiene **su propia solapa**, entre Favoritos y Descargas.
-- En **todas** las causas que el PJN habilite hoy, o solo en las **que
-  selecciones** en Mis causas o en Favoritos.
-- Pide **confirmar** antes de empezar, y avisa si hoy ya dejaste nota en alguna
-  de esas causas. Se hace en la lista de Relacionados del PJN; la página se
-  recarga una vez por nota y el avance se ve en la ventana.
+- Tiene **solapa propia**, entre Favoritos y Descargas.
+- En **todas** las causas que el PJN habilite ese día, o solo en las
+  **seleccionadas** en Mis causas o en Favoritos.
+- Solicita **confirmación** antes de comenzar y advierte si ese día ya se dejó
+  nota en alguna de esas causas. La operación se realiza en la lista de
+  Relacionados del PJN; la página se recarga una vez por nota y el avance se
+  informa en la ventana.
 - Cada nota queda con su resultado: **dejada**, **a verificar** (el PJN no
-  contestó y hay que mirarlo en el expediente) o **no salió**. Nunca se da por
-  dejada una nota que el PJN no confirmó **para esa causa** (un incidente no
-  cuenta por su expediente principal), y una nota ya dejada no se pisa después:
-  si la incluís de nuevo en otra tanda y el PJN ya no le pone lápiz, lo dice y
-  deja el resultado bueno.
-- Si te vas de la lista de Relacionados, la tanda **queda en pausa** y te espera
-  mientras esa pestaña siga abierta: sigue cuando volvés, tardes lo que tardes. Mientras corre, no se baja nada y no se abren causas, para que
-  las recargas del PJN no corten una descarga.
-- La tanda es **de una sola pestaña**: si abrís otra, o duplicás la que está
-  trabajando, la segunda avisa que no la retoma y ninguna nota se deja dos
-  veces. Una tanda de una pestaña que se cerró no se retoma sola.
+  respondió y corresponde constatarlo en el expediente) o **no salió**. Nunca se
+  da por dejada una nota que el PJN no confirmó **para esa causa**: un incidente
+  no vale por su expediente principal. Una nota ya dejada no se sobrescribe: si
+  la causa se incluye en otra tanda y el PJN ya no le asigna lápiz, se informa y
+  se conserva el resultado válido.
+- Si se abandona la lista de Relacionados, la tanda **queda en pausa** y espera
+  mientras esa pestaña siga abierta: continúa al regresar, sin límite de tiempo.
+  Mientras está en curso no se descarga nada ni se abren causas, para que las
+  recargas del PJN no interrumpan una descarga.
+- La tanda pertenece a **una sola pestaña**: si se abre otra, o se duplica la que
+  está trabajando, la segunda informa que no la retoma y ninguna nota se deja dos
+  veces. Una tanda de una pestaña cerrada no se retoma automáticamente.
 
-### Bajar expedientes
+### Descarga de expedientes
 
-- **Desde la lista:** seleccionás causas y bajás el expediente completo de cada
-  una, o desde el menú **⋯** de una causa elegís **qué actuaciones** bajar.
-- **Desde el expediente:** bajás todo o elegís actuaciones (por fecha, tipo o a
-  mano). Cada causa sale en un PDF.
-- **Una sola actuación:** el botón **Bajar** de cada fila, al lado de **Ver**,
-  baja esa actuación sola, con nombre propio y sin tocar lo que tengas elegido.
-- Las actuaciones van en **columnas de verdad** (Fecha, Tipo de actuación,
-  Descripción / detalle y Fs.): se ordenan, se mueven, se ensanchan y se
-  ocultan igual que las de la lista. **Orden del PJN** vuelve al orden en que
-  las trae el sitio, que es el del PDF.
-- Las descargas corren de a una en segundo plano: podés seguir trabajando. Van
-  **de a cinco causas**, con un respiro entre bloque y bloque para no saturar al
-  PJN, y el tope es de **quince esperando por vez**, contando lo que ya esté en
-  Descargas: con más que eso, avisa y no arranca. **Cortar las descargas** corta
-  también durante el respiro y saca lo que esté esperando que elijas actuaciones.
+- **Desde la lista:** se seleccionan causas y se descarga el expediente completo
+  de cada una; desde el menú **⋯** de una causa se elige **qué actuaciones**
+  descargar.
+- **Desde el expediente:** se descarga todo o se eligen actuaciones, por fecha,
+  por tipo o una por una. Cada causa se entrega en un PDF.
+- **Una sola actuación:** el botón **Descargar** de cada fila, junto a **Ver**,
+  obtiene esa actuación aislada, con nombre propio y sin modificar la selección.
+- Las actuaciones se presentan en **columnas** (Fecha, Tipo de actuación,
+  Descripción / detalle y Fs.): se ordenan, se reubican, se ensanchan y se
+  ocultan igual que las de la lista. **Orden del PJN** restituye el orden en que
+  las entrega el sitio, que es el del PDF.
+- Las descargas se ejecutan de a una en segundo plano, de modo que se puede
+  seguir trabajando. Avanzan **de a cinco causas**, con una pausa entre bloques
+  para no sobrecargar al PJN, y el tope es de **quince en espera por vez**,
+  contando lo que ya esté en Descargas: por encima de ese número se advierte y no
+  se inicia. **Cancelar las descargas** surte efecto también durante la pausa y
+  retira lo que esté aguardando una selección de actuaciones.
+- Si una actuación no llega, se reintenta hasta tres veces con esperas crecientes
+  y el motivo queda anotado en el **registro de fallas** (ver más abajo).
 
 ### El expediente por dentro
 
@@ -92,106 +105,131 @@ pastilla se pone **roja** y dice que hay un aviso.
   Intervinientes del PJN en segundo plano y muestra las partes con su rol
   ("Actor: A, Demandado: B", "Imputado: C"), sin los letrados ni los demás
   intervinientes de acompañamiento.
-- **Intervinientes, Causas vinculadas y Recursos** van como secciones de la
-  ficha: se abren cuando las pedís y se leen en ese momento, recorriendo todas
-  las páginas del PJN. Si el PJN corta la lectura a mitad de camino, lo dice: no
-  muestra una lista incompleta como si estuviera completa, ni dice que no hay
-  nada cuando lo que pasó es que la solapa no se llenó.
+- **Intervinientes, Causas vinculadas y Recursos** se presentan como secciones de
+  la ficha: se despliegan a pedido y se leen en ese momento, recorriendo todas
+  las páginas del PJN. Si el sitio interrumpe la lectura, se informa: no se
+  exhibe una lista incompleta como si estuviera completa, ni se declara que no
+  hay contenido cuando lo ocurrido es que la solapa no terminó de cargarse.
 - Desde **Causas vinculadas** se abre cada causa en esta pestaña o en una nueva,
-  y se baja su expediente completo, aunque no esté en tus listas.
+  y se descarga su expediente completo, aunque no figure en las listas propias.
 
-### Las demás funciones del PJN
+### Las demás aplicaciones del PJN
 
-El botón **Funciones del PJN** de la barra azul lleva a las listas del PJN, a
-Radicaciones, a la consulta pública y a las otras aplicaciones: **Escritos**
-(presentar y ver presentados), **DEOX**, **Notificaciones**, **IWECS**,
+El botón **Funciones del PJN** de la barra azul conduce a las listas del sitio, a
+Radicaciones, a la consulta pública y a las restantes aplicaciones: **Escritos**
+(presentar y consultar presentados), **DEOX**, **Notificaciones**, **IWECS**,
 **Autorizados** y **Mis eventos** del Portal. Por causa, el menú **⋯** ofrece
 abrir en esta pestaña o en una nueva, **libro digital** y **presentar escrito**.
 
 ## Cómo se usa
 
-1. Entrá a **scw.pjn.gov.ar** con tu usuario.
-2. En el **Portal del PJN** (portalpjn.pjn.gov.ar) aparece la pastilla apenas
-   entrás: tocala y te lleva a la Consulta Web con SuPJN+ andando.
-3. **SuPJN+** arranca minimizado y lee tus causas y favoritos en segundo plano.
-   La pastilla de abajo a la derecha muestra en qué anda; tocala para abrir la
-   ventana. Las listas se vuelven a leer solas si pasaron más de 10 minutos, o
-   cuando tocás **Actualizar**.
-4. Si quedó una tanda de **dejar nota** a medias, ahí sí se abre sola, para que
-   puedas seguirla o cortarla.
-5. El botón **Recargar** de la barra azul vuelve a cargar la página del PJN y
-   arranca SuPJN+ de cero. Si hay trabajo en curso, primero pide confirmar.
+1. Ingresar a **scw.pjn.gov.ar** con el usuario propio.
+2. En el **Portal del PJN** (portalpjn.pjn.gov.ar) el indicador aparece apenas se
+   ingresa: al pulsarlo conduce a la Consulta Web con SuPJN+ en funcionamiento.
+3. **SuPJN+** se inicia minimizado y lee las causas y los favoritos en segundo
+   plano. El indicador del extremo inferior derecho informa el avance; al
+   pulsarlo se abre la ventana. Las listas se releen automáticamente cuando han
+   pasado más de 10 minutos, o al pulsar **Actualizar**.
+4. Si quedó una tanda de **dejar nota** sin terminar, la ventana sí se despliega
+   por sí sola, para poder continuarla o cancelarla.
+5. El botón **Recargar** de la barra azul vuelve a cargar la página del PJN e
+   inicia SuPJN+ desde cero. Si hay trabajo en curso, solicita confirmación.
 
-Si la sesión del PJN venció, la ventana lo avisa: recargá la página, volvé a
-entrar si lo pide y probá de nuevo. Si el PJN no tiene causas en una lista, la
-ventana lo dice en vez de quedarse en blanco.
+Si la sesión del PJN vence, la ventana lo advierte: corresponde recargar la
+página, ingresar nuevamente si el sitio lo solicita y reintentar. Si el PJN no
+tiene causas en una lista, la ventana lo informa en lugar de quedar en blanco.
 
-### Si algo deja de andar
+### Si algo deja de funcionar
 
-SuPJN+ depende de cómo está armada la página del PJN. En **Acerca de** hay un
-botón **Revisar el PJN**: mira, en segundo plano y sin dejar notas ni cambiar
-nada, las piezas que SuPJN+ necesita (la tabla de causas, el paginador, el
-enlace para abrir, lo de dejar nota, la tabla de actuaciones y un PDF) y dice
-cuáles siguen en su lugar y cuáles cambiaron. Deja un informe para copiar y
-pasar a quien mantiene SuPJN+: **no trae números de causa ni datos tuyos**.
+SuPJN+ depende de la estructura de la página del PJN. En **Acerca de** hay un
+botón **Revisar el PJN**: examina, en segundo plano y sin dejar notas ni
+modificar nada, las piezas que SuPJN+ necesita (la tabla de causas, el paginador,
+el enlace para abrir, la función de dejar nota, la tabla de actuaciones y un PDF)
+e informa cuáles siguen en su lugar y cuáles cambiaron. Genera un informe para
+copiar y remitir a quien mantiene SuPJN+: **no incluye números de causa ni datos
+personales**.
 
-## Tus datos y el respaldo
+### Registro de fallas de descarga
 
-Las listas leídas, las etiquetas, las anotaciones y el resultado de dejar nota
-se guardan **solo en esta PC**, en el almacén de Tampermonkey. No se envían a
-ningún servidor y no se escriben en el PJN.
+Cuando una descarga no se completa, el motivo se pierde apenas cambia el texto en
+pantalla. Por eso SuPJN+ conserva las circunstancias de cada falla en **Acerca
+de**: de qué expediente y de qué actuación se trata, a qué dirección se solicitó
+el documento, qué respondió el servidor (código de estado, tipo de contenido y
+tamaño) y cuántos intentos hicieron falta. Distingue tres situaciones:
 
-**Separado por cuenta del PJN.** El almacén de Tampermonkey es del navegador, no
-de la sesión del PJN, y además se comparte con las ventanas de incógnito. Por eso
-SuPJN+ lee de la barra de usuario del PJN con qué cuenta entraste y guarda lo de
-cada cuenta por separado: **con una cuenta no se ve nada de la otra**, ni causas,
-ni etiquetas, ni apuntes, ni el registro de dejar nota. La barra azul muestra
-siempre con qué cuenta está trabajando. Si no puede identificar la cuenta, lo
-dice y no guarda nada ni muestra lo guardado, para no mezclar dos cuentas. Una
-tanda de dejar nota empezada con una cuenta no se retoma con otra.
+- **Descarga.** El documento no llegó. Un error de red o de servidor se reintenta
+  tres veces, con esperas de 600, 1500 y 3000 milisegundos; una respuesta
+  correcta que no es un PDF corresponde a una actuación sin documento y no se
+  reintenta, porque insistir daría siempre el mismo resultado.
+- **Lectura del PDF.** El documento llegó pero no pudo abrirse: archivo dañado o
+  cifrado.
+- **Trabajo.** Falló el proceso completo, con indicación de la etapa en que se
+  interrumpió: al ubicar la causa, al leer las actuaciones o al armar el archivo.
+
+El registro se guarda por cuenta, conserva las últimas doscientas entradas y
+puede vaciarse. El texto que se copia **omite el número de expediente, la
+descripción de la actuación y los parámetros de la dirección**, de modo que puede
+remitirse sin revelar de qué causa se trata.
+
+## Los datos y el respaldo
+
+Las listas leídas, las etiquetas, las anotaciones, el resultado de dejar nota y
+el registro de fallas se guardan **únicamente en este equipo**, en el almacén de
+Tampermonkey. No se envían a ningún servidor y no se escriben en el PJN.
+
+**Separado por cuenta del PJN.** El almacén de Tampermonkey pertenece al
+navegador y no a la sesión del PJN, y además se comparte con las ventanas de
+incógnito. Por eso SuPJN+ lee de la barra de usuario del sitio con qué cuenta se
+ingresó y guarda los datos de cada cuenta por separado: **con una cuenta no se
+accede a nada de la otra**, ni causas, ni etiquetas, ni anotaciones, ni el
+registro de dejar nota. La barra azul indica siempre con qué cuenta se está
+trabajando. Si no puede identificarla, lo informa y no guarda nada ni muestra lo
+guardado, para no mezclar datos de dos cuentas. Una tanda de dejar nota iniciada
+con una cuenta no se retoma con otra.
 
 La configuración de la ventana (columnas, anchos, orden) es común a todas las
-cuentas, porque no es información de causas. Lo que escribís en el buscador no se
-guarda: puede ser el nombre de un cliente.
+cuentas, porque no constituye información de causas. El texto escrito en el
+buscador no se guarda: puede ser el nombre de un cliente.
 
-Los **apuntes** son notas privadas de trabajo: no tienen nada que ver con
-dejar nota en el expediente.
+Las **anotaciones** son notas privadas de trabajo: no guardan relación con dejar
+nota en el expediente.
 
-Hay dos formas de respaldar, en **Etiquetas y respaldo**:
+Hay dos formas de respaldar, en la solapa **Respaldo**:
 
-- **Una carpeta que elegís vos.** Tocá **Elegir carpeta** y SuPJN+ escribe ahí un
-  archivo por cuenta (`SuPJN+-datos-<cuenta>.json`) con las etiquetas, los
-  apuntes y el registro de dejar nota, cada vez que cambia algo, y lo lee al
-  abrir. Solo importa el archivo de la cuenta con la que entraste. Con la carpeta
-  sincronizada (OneDrive o Drive) sirve para trabajar en dos PC. Conviene una
-  carpeta **aparte de la del programa**: si la carpeta es un repositorio de Git,
-  SuPJN+ avisa, porque los apuntes podrían terminar publicados. Chrome pide el
-  permiso una vez y a veces lo vuelve a pedir: si pasa, la ventana lo dice y hay
-  un botón para volver a darlo.
-- **Una copia a mano.** **Exportar** guarda el mismo archivo donde quieras. La
-  ventana muestra la fecha de la última copia y la marca en rojo cuando pasaron
-  más de 15 días.
+- **Una carpeta designada por el usuario.** Con **Elegir carpeta**, SuPJN+ escribe
+  allí un archivo por cuenta (`SuPJN+-datos-<cuenta>.json`) con las etiquetas, las
+  anotaciones y el registro de dejar nota, cada vez que algo cambia, y lo lee al
+  abrir. Solo importa el archivo de la cuenta con la que se ingresó. Con la
+  carpeta sincronizada (OneDrive o Drive) sirve para trabajar en dos equipos.
+  Conviene una carpeta **ajena a la del programa**: si se trata de un repositorio
+  de Git, SuPJN+ lo advierte, porque las anotaciones podrían terminar publicadas.
+  Chrome solicita el permiso una vez y en ocasiones vuelve a solicitarlo: cuando
+  ocurre, la ventana lo informa y ofrece un botón para otorgarlo de nuevo.
+- **Una copia manual.** **Exportar** guarda el mismo archivo donde se indique. La
+  ventana muestra la fecha de la última copia y la señala en rojo cuando han
+  transcurrido más de 15 días.
 
-Para llevar los datos a otra PC, **Importar**. No borra nada tuyo: suma las
-etiquetas que falten y de cada causa deja lo más nuevo (el apunte más nuevo si
-las dos copias tienen fecha, y los dos textos si alguna viene de una copia vieja
-sin fecha), más el resultado de dejar nota más nuevo. Un apunte **borrado** en
-una PC no se borra en la otra: si la otra todavía lo tiene, vuelve. Eso es a
-propósito, para no perder texto sin querer.
+Para trasladar los datos a otro equipo, **Importar**. No elimina nada: suma las
+etiquetas faltantes y de cada causa conserva lo más reciente (la anotación más
+nueva si ambas copias tienen fecha, y los dos textos si alguna proviene de una
+copia anterior sin fecha), más el resultado de dejar nota más reciente. Una
+anotación **eliminada** en un equipo no se elimina en el otro: si el otro todavía
+la conserva, reaparece. Es deliberado, para no perder texto involuntariamente.
 
 ## Instalación
 
-1. Tené [Tampermonkey](https://www.tampermonkey.net/) instalado en Chrome o Edge.
-2. Abrí el enlace de instalación:
+1. Contar con [Tampermonkey](https://www.tampermonkey.net/) instalado en Chrome o
+   Edge.
+2. Abrir el enlace de instalación:
    **[Instalar supjn-plus.user.js](https://raw.githubusercontent.com/Elzas85/SUPJNPLUS/main/supjn-plus.user.js)**
-3. Tampermonkey muestra la pantalla de instalación. Tocá *Instalar*.
+3. Tampermonkey muestra la pantalla de instalación. Pulsar *Instalar*.
 
-**Importante:** SuPJN+ ya trae todo **PJN+** y todo **NOTATOMIC**. Desactivá
-esos dos en Tampermonkey: con los tres activos se duplican los paneles y hay
-dos scripts apretando los mismos lápices.
+**Importante:** SuPJN+ ya incorpora la totalidad de **PJN+** y de **NOTATOMIC**.
+Corresponde desactivar esos dos en Tampermonkey: con los tres activos se duplican
+los paneles y dos scripts operan sobre los mismos lápices.
 
-Tampermonkey revisa ese mismo enlace y se **actualiza solo** cuando se publica
-una versión con número mayor.
+Tampermonkey consulta ese mismo enlace y se **actualiza automáticamente** cuando
+se publica una versión con número mayor.
 
 ## Autor
 
