@@ -1,15 +1,15 @@
 // ==UserScript==
 // @name         SuPJN+ - Consulta Web del PJN ampliada
 // @namespace    ignacio.kinbaum
-// @version      0.3.0
-// @description  Una sola ventana sobre la Consulta Web del PJN: Mis causas y Favoritos, en trámite y fuera de trámite, con búsqueda, filtros, orden y columnas movibles; etiquetas y anotaciones propias con respaldo manual; dejar nota en todas o en las seleccionadas; bajar expedientes en PDF eligiendo causas desde la lista o actuaciones desde el expediente; y acceso a las demás funciones del PJN.
+// @version      0.5.3
+// @description  Una sola ventana sobre la Consulta Web del PJN: Mis causas y Favoritos, en trámite y fuera de trámite, con búsqueda, filtros, orden y columnas movibles; etiquetas y anotaciones propias, con copia a mano o guardado automático en una carpeta que elegís; dejar nota en todas o en las seleccionadas; bajar expedientes en PDF eligiendo causas desde la lista o actuaciones desde el expediente; y acceso a las demás funciones del PJN.
 // @author       Ignacio Kinbaum
 // @license      GPL-3.0-or-later
 // @copyright    2026, Ignacio Kinbaum (estudiojuridicokinbaum@gmail.com)
-// @homepageURL  https://github.com/Elzas85/SUPJNPLUS
-// @supportURL   https://github.com/Elzas85/SUPJNPLUS/issues
-// @updateURL    https://raw.githubusercontent.com/Elzas85/SUPJNPLUS/main/supjn-plus.user.js
-// @downloadURL  https://raw.githubusercontent.com/Elzas85/SUPJNPLUS/main/supjn-plus.user.js
+// @homepageURL  https://github.com/Elzas85/SuPJNPLUS
+// @supportURL   https://github.com/Elzas85/SuPJNPLUS/issues
+// @updateURL    https://raw.githubusercontent.com/Elzas85/SuPJNPLUS/main/supjn-plus.user.js
+// @downloadURL  https://raw.githubusercontent.com/Elzas85/SuPJNPLUS/main/supjn-plus.user.js
 // @match        https://scw.pjn.gov.ar/scw/*
 // @match        https://portalpjn.pjn.gov.ar/*
 // @run-at       document-idle
@@ -103,8 +103,18 @@
  * DÓNDE SE GUARDA
  *   Todo en el almacén de Tampermonkey de esta PC: las listas leídas, la
  *   configuración, las etiquetas, los apuntes y el último resultado de
- *   dejar nota por causa. Etiquetas, apuntes y notas se respaldan a mano con
- *   Exportar. No hay guardado automático.
+ *   dejar nota por causa.
+ *   SEPARADO POR CUENTA DEL PJN. El almacén de Tampermonkey es del navegador y
+ *   no de la sesión del PJN, y además se comparte con las ventanas de incógnito:
+ *   sin separar, al entrar con otra cuenta se veían las causas y los apuntes de
+ *   la anterior. La cuenta se lee de la barra de usuario del PJN y es el sufijo
+ *   de cada clave. Si no se la puede identificar, no se lee ni se escribe nada
+ *   de lo guardado. Solo la configuración de la ventana es común a las cuentas,
+ *   y el texto del buscador no se guarda (puede ser el nombre de un cliente). Las etiquetas, los apuntes y las notas se copian con
+ *   Exportar; y, si se elige una carpeta de respaldo (Etiquetas y respaldo), se
+ *   guardan solos ahí en cada cambio y se leen al abrir. La carpeta la elige el
+ *   usuario una vez y conviene que esté lejos de la del programa, para que los
+ *   apuntes no terminen en un repositorio.
  *
  * TERMINOLOGÍA
  *   ANOTACIONES son las notas privadas de trabajo. DEJAR NOTA es el acto
@@ -131,13 +141,13 @@
 
   const APP = {
     nombre: 'SuPJN+',
-    version: 'beta 0.3.0',
+    version: 'beta 0.5.3',
     autor: 'Ignacio Kinbaum',
     anio: '2026',
     mail: 'estudiojuridicokinbaum@gmail.com',
     licencia: 'GPL-3.0-or-later',
     licenciaUrl: 'https://www.gnu.org/licenses/gpl-3.0.html',
-    github: 'https://github.com/Elzas85/SUPJNPLUS'
+    github: 'https://github.com/Elzas85/SuPJNPLUS'
   };
 
   // Paleta del propio PJN: el azul de la barra superior y el de las tablas.
@@ -150,6 +160,8 @@
   const K_MARCAS = 'supjn.marcas.v1';
   const K_RESPALDO = 'supjn.respaldo.v1';
   const K_NOTAS = 'supjn.notas.v1';       // último resultado de dejar nota por causa
+  const K_HORAS = 'supjn.horas.v1';       // hora del último documento firmado, por causa
+  const K_VISTO = 'supjn.visto.v1';       // cómo estaba cada causa la última vez que la miraste
   // La tanda en curso va en una clave propia. NOTATOMIC usaba
   // 'notatomic_corrida': si quedó instalado, con clave propia cada uno hace lo
   // suyo y no se pisan los lápices.
@@ -158,7 +170,7 @@
   // En el Portal del PJN (otro sitio) SuPJN+ no puede leer la Consulta Web: ahí
   // solo aparece la pastilla, para entrar de una.
   const EN_PORTAL = location.host !== 'scw.pjn.gov.ar';
-  const VIEJA_DESPUES_DE = 30 * 60 * 1000;
+  const VIEJA_DESPUES_DE = 10 * 60 * 1000;
   const BLOQUE_DESCARGAS = 5;             // causas seguidas antes del respiro
   const PAUSA_BLOQUE = 20 * 1000;         // cuánto dura el respiro
   const TOPE_DESCARGAS = 15;              // máximo de causas por vez
@@ -350,6 +362,144 @@
   const guardarSesion = (k, v) => { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* sin persistencia */ } };
   const borrarSesion = (k) => { try { sessionStorage.removeItem(k); } catch (e) { /* sin persistencia */ } };
 
+  // ------------------------------------------------- la cuenta del PJN
+  //
+  // El almacén de Tampermonkey es del navegador, no de la sesión del PJN: la
+  // misma copia se ve con cualquier cuenta y también en incógnito. Por eso todo
+  // lo que es de las causas se guarda separado por cuenta, y sin cuenta
+  // identificada no se lee ni se escribe nada. Mostrar las causas de una cuenta
+  // en la sesión de otra es exactamente lo que esto evita.
+  //
+  // La cuenta la muestra el encabezado de la Consulta Web arriba a la derecha
+  // (el CUIT, al lado del ícono de usuario). Se la busca por texto y no por el
+  // marcado, para que un cambio de maquetado del PJN no la haga perder.
+
+  const RE_CUENTA = /(?:^|[^\d-])(\d{2}-?\d{8}-?\d)(?:[^\d-]|$)/;
+
+  function cuentaEnTexto(t) {
+    const m = RE_CUENTA.exec(' ' + String(t || '').replace(/\s+/g, ' ') + ' ');
+    return m ? m[1].replace(/-/g, '') : '';
+  }
+
+  // Solo se mira la barra de usuario: ahí el PJN pone la cuenta. En el resto de
+  // la página hay CUIT de las partes, y tomar uno de esos por la cuenta sería
+  // peor que no identificarla (se armaría un compartimento falso).
+  function cajasDeUsuario() {
+    const out = [];
+    const agregar = (e) => {
+      if (!e || out.indexOf(e) >= 0) return;
+      if (e.closest && e.closest('#supjn, #supjn-pastilla')) return;
+      out.push(e);
+    };
+    document.querySelectorAll('nav, header, .navbar').forEach(agregar);
+    // Por si el PJN cambia el marcado: lo que rodea al ícono de usuario.
+    document.querySelectorAll('.fa-user, .glyphicon-user, [class*="icon-user"]').forEach((i) => {
+      agregar((i.closest && i.closest('a, li, span, div')) || i.parentNode);
+    });
+    return out;
+  }
+
+  let ULTIMO_TXT = '';
+
+  // Se recorren nodos de texto y no el textContent del contenedor: así no se
+  // pegan dígitos de dos elementos distintos y se inventa una cuenta. Y se
+  // exige que el nodo sea el número y nada más.
+  function cuentaEnNodos(raiz, tope) {
+    let n, vistos = 0, hallada = '';
+    const it = document.createNodeIterator(raiz, 4);
+    while ((n = it.nextNode())) {
+      if (++vistos > tope) break;
+      const p = n.parentNode;
+      if (!p || !p.closest) continue;
+      if (p.closest('#supjn, #supjn-pastilla')) continue;
+      if (/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(p.nodeName)) continue;
+      const t = String(n.nodeValue || '').trim();
+      if (!/^\d{2}-?\d{8}-?\d$/.test(t)) continue;
+      const c = t.replace(/-/g, '');
+      if (hallada && hallada !== c) return '\u0000';   // dos distintas en la misma caja
+      if (!hallada) {
+        hallada = c;
+        const cerca = p.textContent ? String(p.textContent).replace(/\s+/g, ' ').trim() : t;
+        ULTIMO_TXT = (cerca.length > 3 && cerca.length <= 60 ? cerca : t).replace(/[\u25BE\u25BC\u2304]/g, '').trim();
+      }
+    }
+    return hallada;
+  }
+
+  // Si aparecen dos números distintos, no se adivina: se sigue sin cuenta, que
+  // es el estado seguro (no se muestra ni se guarda nada).
+  function buscarCuentaEnLaPagina() {
+    ULTIMO_TXT = '';
+    let hallada = '';
+    const cajas = cajasDeUsuario();
+    for (let i = 0; i < cajas.length; i++) {
+      const c = cuentaEnNodos(cajas[i], 400);
+      if (c === '\u0000') { ULTIMO_TXT = ''; return ''; }
+      if (!c) continue;
+      if (hallada && hallada !== c) { ULTIMO_TXT = ''; return ''; }
+      hallada = hallada || c;
+    }
+    return hallada;
+  }
+
+  let CUENTA = '';
+  let CUENTA_TXT = '';     // lo que dice el encabezado: puede traer el nombre
+
+  // La cuenta sale siempre de la página que se está viendo, nunca de algo
+  // guardado: una cuenta recordada queda pegada después de cerrar sesión y se
+  // le mostraría a la siguiente persona que entre en esa misma pestaña.
+  function resolverCuenta() {
+    const enPagina = buscarCuentaEnLaPagina();
+    CUENTA = enPagina;
+    CUENTA_TXT = enPagina ? (ULTIMO_TXT || enPagina) : '';
+    return CUENTA;
+  }
+
+  // Para mostrarla sin escribir el número entero en pantalla.
+  const cuentaCorta = (c) => { const x = String(c || CUENTA || ''); return x ? x.slice(0, 2) + '...' + x.slice(-3) : ''; };
+
+  const SIN_CUENTA = 'No pude identificar con qué cuenta entraste al PJN. Lo que leo del PJN lo podés usar igual, pero no guardo nada ni muestro lo que tenía guardado (etiquetas, apuntes, notas): no quiero mezclar los datos de dos cuentas. Recargá la página; si sigue igual, avisame en qué pantalla pasa.';
+
+  const claveDe = (k) => k + '@' + CUENTA;
+  const leerDeCuenta = (k, def) => (CUENTA ? leerAlmacen(claveDe(k), def) : def);
+  const guardarEnCuenta = (k, v) => (CUENTA ? guardarAlmacen(claveDe(k), v) : false);
+
+  // Solo para el banco de pruebas: cambia la cuenta en caliente y relee lo de esa
+  // cuenta, como si se hubiera entrado con otra.
+  function cuentaDePrueba(c) {
+    CUENTA = String(c || '');
+    CUENTA_TXT = CUENTA;
+    DATOS.rel = validarDatos(leerDeCuenta(K_REL, null));
+    DATOS.fav = validarDatos(leerDeCuenta(K_FAV, null));
+    indexar('rel');
+    indexar('fav');
+    refrescarMarcas();
+    refrescarNotas();
+    refrescarHoras();
+    refrescarVisto();
+  }
+
+  resolverCuenta();
+
+  // Migración de la 0.5.2 y anteriores: lo guardado no tenía cuenta. Las
+  // etiquetas, los apuntes, las notas y las horas son suyos y van a la cuenta
+  // con la que está entrando ahora. Las listas NO se migran: pueden haber
+  // quedado de otra cuenta (el almacén era compartido) y se releen en segundos.
+  function migrarACuenta() {
+    if (!CUENTA) return false;
+    if (leerAlmacen('supjn.mig.cuenta@' + CUENTA, null)) return false;
+    let algo = false;
+    [K_MARCAS, K_NOTAS, K_HORAS, K_VISTO, K_RESPALDO].forEach((k) => {
+      const v = leerAlmacen(k, null);
+      if (v == null) return;
+      if (leerAlmacen(claveDe(k), null) == null) guardarAlmacen(claveDe(k), v);
+      algo = true;
+    });
+    guardarAlmacen('supjn.mig.cuenta@' + CUENTA, { fecha: Date.now() });
+    return algo;
+  }
+  migrarACuenta();
+
   // --------------------------------------------------------- la página del PJN
   //
   // Toda búsqueda en la página visible deja afuera la ventana de SuPJN+: tiene
@@ -526,6 +676,57 @@
     return paginaActiva(doc, tablaFn) === destino;
   }
 
+  // El PJN trae la lista ordenada por carátula y tiene un control "Ordenar Lista
+  // Por" con un "Ordenar" al lado. Pidiéndole FECHA, el sitio la devuelve por
+  // última actuación, de la más nueva a la más vieja, y ahí sí desempata por hora
+  // (la hora no la muestra, pero la usa). Copiar ese orden es la única forma de
+  // ver lo mismo que el PJN.
+  function selectorOrden(doc) {
+    const sel = [...doc.querySelectorAll('select')].find((s) => !esNuestro(s) &&
+      [...s.options].some((o) => /^fecha$/i.test(limpio(o.textContent)) || /^fecha$/i.test(limpio(o.value))));
+    if (!sel) return null;
+    const opt = [...sel.options].find((o) => /^fecha$/i.test(limpio(o.textContent)) || /^fecha$/i.test(limpio(o.value)));
+    const boton = [...doc.querySelectorAll('a, input[type=submit], input[type=button], button')]
+      .find((b) => !esNuestro(b) && /^ordenar$/i.test(limpio(b.value || b.textContent)));
+    return { sel, opt, boton };
+  }
+
+  // Deja la lista del marco ordenada por fecha. Devuelve true si hizo falta pedirlo.
+  // El PJN puede resolverlo de tres formas: enviando el formulario (ahí se repite
+  // el pedido por fetch, como con las demás acciones), navegando la página, o por
+  // ajax. Las tres se esperan igual: hasta que la lista sea otra.
+  async function ordenarPorFecha(fr, avisar) {
+    const o = selectorOrden(fr.contentDocument);
+    if (!o || !o.boton) return false;
+    const puesto = () => {
+      const s = selectorOrden(fr.contentDocument);
+      if (!s) return false;
+      const op = s.sel.options[s.sel.selectedIndex];
+      return !!op && /^fecha$/i.test(limpio(op.textContent) || limpio(op.value));
+    };
+    if (puesto()) return false;
+    avisar('Le pido al PJN la lista ordenada por fecha...');
+    // Ojo: al elegir FECHA en el desplegable, el propio control ya "queda puesto",
+    // así que eso no sirve para saber si el PJN contestó. Lo que se espera es otro
+    // documento (si navega) o otras filas (si lo resuelve por ajax).
+    const doc0 = fr.contentDocument;
+    const antes = firmaLista(doc0);
+    o.sel.value = o.opt.value;
+    try { o.sel.dispatchEvent(new fr.contentWindow.Event('change', { bubbles: true })); } catch (e) { /* no todos lo necesitan */ }
+    permitirUpgrade(fr.contentDocument);
+    const url = await postComoClic(fr, () => { o.boton.click(); });
+    if (url) await esperarCarga(fr, () => { fr.src = url; }, esLista);
+    else {
+      await esperarA(() => {
+        const d = fr.contentDocument;
+        if (!d || !d.body) return false;
+        if (d !== doc0) return d.readyState === 'complete' && esLista(d);
+        return firmaLista(d) !== antes;
+      }, 25000);
+    }
+    return true;
+  }
+
   const casillaVerTodos = (doc) => [...doc.querySelectorAll('input[type=checkbox]')]
     .find((c) => !esNuestro(c) && /ver todos los expedientes/i.test(limpio((c.closest('tr') || c.parentElement || {}).textContent)));
 
@@ -676,6 +877,9 @@
       if (tipoLista(fr.contentDocument) !== tipo) throw new Error('el PJN no devolvió la lista de ' + L.pjn);
       const casilla0 = casillaVerTodos(fr.contentDocument);
       if (casilla0 && casilla0.checked) throw new Error('la lista de ' + L.pjn + ' vino con "Ver todos" tildado');
+      // Primero, que el PJN la ordene por fecha: así el orden que se guarda es el
+      // mismo que se ve en el sitio, con la hora adentro.
+      try { await ordenarPorFecha(fr, avisar); } catch (e) { /* si no se puede, se lee igual */ }
       const tramite = await recorrerLista(fr, L.nombre + ' en trámite', avisar);
 
       const casilla = casillaVerTodos(fr.contentDocument);
@@ -687,13 +891,18 @@
         await esperarCarga(fr, () => { casilla.checked = true; consultar.click(); }, esLista);
         const casilla2 = casillaVerTodos(fr.contentDocument);
         if (!casilla2 || !casilla2.checked) throw new Error('el PJN no tomó "Ver todos los expedientes"');
+        try { await ordenarPorFecha(fr, avisar); } catch (e) { /* si no se puede, se lee igual */ }
         todas = await recorrerLista(fr, L.nombre + ' fuera de trámite', avisar);
       }
 
       const deTramite = {};
       tramite.forEach((f) => { deTramite[f.exp] = f; });
       const causas = (todas || tramite).map((f) => ({
-        exp: f.exp, dep: f.dep, car: f.car, sit: f.sit, ult: f.ult, pos: f.pos,
+        exp: f.exp, dep: f.dep, car: f.car, sit: f.sit, ult: f.ult,
+        // Dos lugares: el que ocupa en la lista completa del PJN y el que ocupa en
+        // la de solo en trámite. Según lo que se esté mirando, se copia uno u otro.
+        pos: todas ? f.pos : null,
+        posTramite: deTramite[f.exp] ? deTramite[f.exp].pos : null,
         fav: tipo === 'fav' ? true : f.fav,
         tramite: todas ? !!deTramite[f.exp] : true,
         pagTodas: todas ? f.pag : null,
@@ -704,7 +913,7 @@
         causas.forEach((c) => { enTodas[c.exp] = true; });
         tramite.forEach((f) => {
           if (enTodas[f.exp]) return;
-          causas.push({ exp: f.exp, dep: f.dep, car: f.car, sit: f.sit, ult: f.ult, pos: todas.length + f.pos, fav: tipo === 'fav' ? true : f.fav, tramite: true, pagTodas: null, pagTramite: f.pag });
+          causas.push({ exp: f.exp, dep: f.dep, car: f.car, sit: f.sit, ult: f.ult, pos: todas.length + f.pos, posTramite: f.pos, fav: tipo === 'fav' ? true : f.fav, tramite: true, pagTodas: null, pagTramite: f.pag });
         });
       }
       return { fecha: Date.now(), causas, enTramite: causas.filter((c) => c.tramite).length, total: causas.length };
@@ -1010,7 +1219,10 @@
     return r.url;
   }
 
+  // Devuelve el panel de la solapa. seLleno queda en el propio panel: dice si el
+  // PJN alcanzó a poner algo adentro.
   async function abrirSolapa(fr, etiqueta) {
+    let seLleno = true;
     let td = cabezaSolapa(fr.contentDocument, etiqueta);
     if (!td) throw new Error('el expediente no tiene la solapa ' + etiqueta);
     if (/:header:inactive$/.test(td.id)) {
@@ -1021,11 +1233,16 @@
       };
       const url = await postComoClic(fr, () => { td.click(); });
       if (url) await esperarCarga(fr, () => { fr.src = url; }, (dd) => lleno(dd) || esExpediente(dd));
-      else if (!(await esperarA(() => lleno(fr.contentDocument), 20000))) throw new Error('el PJN no abrió ' + etiqueta);
+      // La espera de arriba se conforma con que haya cargado el expediente, así
+      // que la solapa puede seguir vacía. Se le da otra oportunidad y, si igual no
+      // se llena, se sigue pero avisando: una solapa que no se llenó no es lo
+      // mismo que una solapa sin nada, y decir que no hay nada sería mentir.
+      if (!(await esperarA(() => lleno(fr.contentDocument), url ? 8000 : 20000))) seLleno = false;
       td = cabezaSolapa(fr.contentDocument, etiqueta) || td;
     }
     const p = panelDeSolapa(fr.contentDocument, td);
     if (!p) throw new Error('el PJN no abrió ' + etiqueta);
+    p.__seLleno = seLleno;
     return p;
   }
 
@@ -1038,13 +1255,18 @@
       await esperarCarga(fr, () => { fr.src = RUTA.exp + '?cid=' + encodeURIComponent(cid); }, esExpediente);
       avisar('Pido ' + etiqueta + ' al PJN...');
       let p = await abrirSolapa(fr, etiqueta);
+      const seLleno = p.__seLleno !== false;
       const cabs = [];
       const filas = [];
       const vistos = {};
-      for (let v = 0; v < 300; v++) {
+      // Si el paginador del PJN se corta a mitad de camino, lo leído no es toda
+      // la lista: hay que decirlo y no mostrarlo como si estuviera completo.
+      let completa = true;
+      let v = 0;
+      for (; v < 300; v++) {
         p = panelVivo(fr, etiqueta) || p;
         const t = p.querySelector('table');
-        if (!t) break;
+        if (!t) { if (v) completa = false; break; }
         if (!cabs.length) {
           const cab = (t.tHead && t.tHead.rows[0]) || t.rows[0];
           if (cab) [...cab.cells].forEach((c) => cabs.push(cabezaLimpia(textoVisible(c))));
@@ -1061,9 +1283,14 @@
         if (!sig) break;
         const antes = firmaPanel(p);
         sig.click();
-        if (!(await esperarA(() => firmaPanel(panelVivo(fr, etiqueta)) !== antes, 20000))) break;
+        // Se pide un panel vivo de verdad: sin panel, la firma vacía daba por
+        // cumplida la espera al instante y el bucle giraba en falso.
+        if (!(await esperarA(() => { const pv = panelVivo(fr, etiqueta); return !!pv && firmaPanel(pv) !== antes; }, 20000))) { completa = false; break; }
       }
-      return { cabs, filas };
+      if (v >= 300) completa = false;
+      // Sin filas y sin haberse llenado, no se sabe si la solapa está vacía.
+      if (!filas.length && !seLleno) completa = false;
+      return { cabs, filas, completa };
     } finally {
       fr.remove();
     }
@@ -1105,6 +1332,20 @@
     }
   }
 
+  // La última actuación con PDF de una causa, sin leer el expediente entero: el
+  // PJN las trae de la más nueva a la más vieja, así que alcanza la primera página.
+  async function ultimaActuacionConPDF(k, avisar) {
+    const url = await direccionDe(k, 'ojo', avisar);
+    const cid = new URL(url).searchParams.get('cid');
+    const fr = crearMarco();
+    try {
+      await esperarCarga(fr, () => { fr.src = RUTA.exp + '?cid=' + encodeURIComponent(cid); }, esExpediente);
+      return actuacionesDe(fr.contentDocument, false)[0] || null;
+    } finally {
+      fr.remove();
+    }
+  }
+
   const nombreArchivo = (exp) => 'Expediente-' + (clave(exp).replace(/[\s/]+/g, '-') || 'PJN');
 
   // ---------------------------------------------------------------- los PDF
@@ -1119,6 +1360,75 @@
     return false;
   }
 
+  // Una fecha de PDF: D:AAAAMMDDHHmmSS seguida, si está, del huso horario
+  // (-03'00' o Z). El formato admite escribir de menos, así que se completa.
+  // Se devuelve el instante, para poder compararlo y mostrarlo en hora de acá.
+  function fechaPDF(cruda, huso) {
+    // Se completa lo que falte: el mes y el día arrancan en 01, la hora en 00.
+    const d = (cruda + '0101'.slice(Math.min(4, Math.max(0, cruda.length - 4))) + '00000000000000').slice(0, 14);
+    const a = +d.slice(0, 4), me = +d.slice(4, 6), dd = +d.slice(6, 8);
+    const hh = +d.slice(8, 10), mi = +d.slice(10, 12), ss = +d.slice(12, 14);
+    // Fuera de rango es basura: pasa cuando el azar de un archivo comprimido
+    // forma algo parecido a una fecha. Si se colara, le ganaría a la firma buena.
+    if (a < 1990 || a > 2100 || me < 1 || me > 12 || dd < 1 || dd > 31 || hh > 23 || mi > 59 || ss > 59) return null;
+    let ms;
+    if (huso) {
+      const signo = huso[0] === '-' ? -1 : 1;
+      const min = /^[+-](\d{2})'?(\d{2})?/.exec(huso);
+      const desfase = huso[0] === 'Z' || !min ? 0 : signo * ((+min[1]) * 60 + (+(min[2] || 0)));
+      ms = Date.UTC(a, me - 1, dd, hh, mi, ss) - desfase * 60000;
+    } else {
+      // Sin huso escrito, el formato dice que es hora local: se la toma como está.
+      ms = new Date(a, me - 1, dd, hh, mi, ss).getTime();
+    }
+    return isNaN(ms) ? null : ms;
+  }
+
+  // La hora no está en el HTML del PJN, pero sí en el documento: las resoluciones
+  // y los escritos van firmados digitalmente y la firma lleva fecha y hora
+  // (/M (D:AAAAMMDDHHmmSS)). Si no hay firma, se prueba con la fecha de
+  // modificación y con la de creación del archivo.
+  function horaDePDF(buf) {
+    let s = '';
+    try {
+      const b = new Uint8Array(buf);
+      // La firma digital se agrega al final del archivo, no al principio: en un
+      // expediente escaneado grande, leer la cabeza devolvía la fecha del escáner.
+      // Se leen las dos puntas.
+      const TOPE = 3000000;
+      const partes = b.length > TOPE * 2 ? [b.subarray(0, TOPE), b.subarray(b.length - TOPE)] : [b];
+      partes.forEach((trozo) => {
+        for (let i = 0; i < trozo.length; i += 8192) s += String.fromCharCode.apply(null, trozo.subarray(i, Math.min(i + 8192, trozo.length)));
+      });
+    } catch (e) { return null; }
+    const halladas = { M: [], ModDate: [], CreationDate: [] };
+    const re = /\/(M|ModDate|CreationDate)\s*\(\s*D:(\d{4,14})(Z|[+-]\d{2}'?\d{0,2})?/g;
+    let m;
+    while ((m = re.exec(s)) !== null) {
+      const ms = fechaPDF(m[2], m[3] || '');
+      if (ms === null) continue;
+      // La /M de una firma vive cerca del /ByteRange que dice qué se firmó. La
+      // /M suelta también la usan las anotaciones del PDF, que no son la firma.
+      const cerca = m[1] === 'M' && /\/(ByteRange|SubFilter|Type\s*\/\s*Sig)/.test(s.slice(Math.max(0, m.index - 1500), m.index + 1500));
+      halladas[m[1]].push({ ms, firma: cerca });
+    }
+    const firmas = halladas.M.filter((x) => x.firma);
+    // La más nueva de las firmas: es la última vez que se firmó el documento.
+    const mayor = (l) => l.slice().sort((x, y) => x.ms - y.ms).pop();
+    const elegida = firmas.length ? mayor(firmas)
+      : halladas.M.length ? mayor(halladas.M)
+        : halladas.ModDate.length ? mayor(halladas.ModDate)
+          : halladas.CreationDate.length ? mayor(halladas.CreationDate) : null;
+    if (!elegida) return null;
+    const d = new Date(elegida.ms);
+    const dos = (n) => String(n).padStart(2, '0');
+    return {
+      f: dos(d.getDate()) + '/' + dos(d.getMonth() + 1) + '/' + d.getFullYear(),
+      hh: dos(d.getHours()) + ':' + dos(d.getMinutes()),
+      origen: firmas.length ? 'la firma del documento' : halladas.M.length ? 'la fecha del documento' : 'la fecha del archivo'
+    };
+  }
+
   // ¿Venció la sesión del PJN? Se pide la lista: si el PJN manda al ingreso
   // (que es otro sitio) el navegador corta el pedido, y si devuelve la página
   // de usuario y clave, también venció. Se recuerda medio minuto para no
@@ -1126,14 +1436,21 @@
   let sesionMirada = { ts: 0, vencida: false };
   async function sesionVencida() {
     if (Date.now() - sesionMirada.ts < 30000) return sesionMirada.vencida;
-    let vencida;
-    try {
-      const r = await fetch(RUTA.rel, { credentials: 'include' });
-      const t = await r.text();
-      vencida = new URL(r.url).host !== location.host || /type=["']?password/i.test(t);
-    } catch (e) {
-      // Sin conexión no se puede saber; con conexión, el corte es la redirección al ingreso.
-      vencida = window.navigator.onLine !== false;
+    let vencida = false;
+    // Se prueba dos veces: un hipo de la red no es una sesión vencida, y decir
+    // que venció cuando no venció manda al usuario a loguearse al pedo.
+    for (let i = 0; i < 2; i++) {
+      try {
+        const r = await fetch(RUTA.rel, { credentials: 'include' });
+        const t = await r.text();
+        vencida = new URL(r.url).host !== location.host || /type=["']?password/i.test(t);
+        break;
+      } catch (e) {
+        // Sin conexión no se puede saber; con conexión, el corte es la redirección al ingreso.
+        vencida = window.navigator.onLine !== false;
+        if (!vencida) break;
+        if (i === 0) await dormir(800);
+      }
     }
     sesionMirada = { ts: Date.now(), vencida };
     return vencida;
@@ -1197,7 +1514,9 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 120000);
+    // No se suelta antes: con "preguntar dónde guardar cada archivo" prendido, la
+    // descarga recién arranca cuando el usuario elige la carpeta.
+    setTimeout(() => URL.revokeObjectURL(url), 180000);
   }
 
   // -------------------------------------------------------- cola de descargas
@@ -1213,26 +1532,45 @@
   // De a cinco causas y un respiro entre bloque y bloque: bajar cincuenta
   // expedientes seguidos es maltratar al PJN y dejar la app ocupada horas.
   let hechasSeguidas = 0;
+  let ultimaBajada = 0;
   let pausaHasta = 0;
   const saltarPausa = () => { pausaHasta = 0; pintarDescargas(); };
 
   function nuevoTrabajo(datos) {
-    const t = Object.assign({ id: 't' + (++idTrabajo), exp: '', car: '', modo: 'todo', estado: 'en cola', texto: 'En cola', frac: 0, acts: null, elegidas: null, filtro: { texto: '', desde: '', hasta: '' }, urls: null, parcial: false }, datos);
+    const t = Object.assign({ id: 't' + (++idTrabajo), creado: Date.now(), exp: '', car: '', modo: 'todo', estado: 'en cola', texto: 'En cola', frac: 0, acts: null, elegidas: null, filtro: { texto: '', desde: '', hasta: '' }, urls: null, parcial: false }, datos);
     COLA.push(t);
     return t;
   }
 
+  // Lo que va a bajar solo: cuenta para el tope. "eligiendo" no, porque espera al
+  // usuario y podría bloquear el tope para siempre.
+  const PENDIENTE = /en cola|abriendo|leyendo|bajando|a bajar/;
+  let cortePedidoEn = 0;
+  const EN_JUEGO = /en cola|abriendo|leyendo|bajando|eligiendo|a bajar/;
+  const pendientesCola = () => COLA.filter((t) => PENDIENTE.test(t.estado)).length;
+
+  // El tope es sobre lo que queda por bajar, no sobre la tanda que se pide: si
+  // no, seleccionando de a quince dos veces se encolaban treinta.
+  function hayLugarPara(n) {
+    const esperando = pendientesCola();
+    const libres = TOPE_DESCARGAS - esperando;
+    if (n <= libres) return true;
+    avisar(libres <= 0
+      ? 'Ya hay ' + plural(esperando, 'causa esperando', 'causas esperando') + ' en Descargas y el tope es ' + TOPE_DESCARGAS + ' por vez: esperá a que terminen.'
+      : 'Son demasiadas de una vez: entran ' + plural(libres, 'causa más', 'causas más') + ', porque el tope es ' + TOPE_DESCARGAS + ' por vez contando las que ya están en Descargas.', true);
+    return false;
+  }
+
   function encolarCausas(claves, modo) {
-    let n = 0;
-    claves.forEach((k) => {
-      const ya = COLA.find((t) => t.exp === k && t.modo === modo && /en cola|abriendo|leyendo|bajando|eligiendo|a bajar/.test(t.estado));
-      if (ya) return;
+    const nuevas = claves.filter((k) => !COLA.find((t) => t.exp === k && t.modo === modo && EN_JUEGO.test(t.estado)));
+    if (!nuevas.length) return 0;
+    if (!hayLugarPara(nuevas.length)) return -1;
+    nuevas.forEach((k) => {
       const c = causaPorClave(k);
       nuevoTrabajo({ exp: k, car: c ? c.car : '', modo });
-      n++;
     });
     procesarCola();
-    return n;
+    return nuevas.length;
   }
 
   function textoTrabajo(t, texto, frac) {
@@ -1244,11 +1582,18 @@
   async function procesarCola() {
     if (colaCorriendo) return;
     colaCorriendo = true;
+    // Un corte pedido con la cola parada no alcanza a lo que se encole después:
+    // si quedara prendido, la tanda siguiente se cortaría sola al empezar.
+    cortarCola = false;
     pintarPastilla();
     try {
       for (;;) {
         const t = COLA.find((x) => x.estado === 'en cola' || x.estado === 'a bajar');
         if (!t) break;
+        // Si entre bloque y bloque pasó más tiempo que el respiro, la cuenta
+        // arranca de nuevo: no tiene sentido hacer esperar a quien encola una
+        // sola causa media hora después.
+        if (hechasSeguidas && Date.now() - ultimaBajada > PAUSA_BLOQUE) hechasSeguidas = 0;
         // Respiro entre bloques, salvo que se corte o se pida seguir ahora.
         if (hechasSeguidas >= BLOQUE_DESCARGAS) {
           hechasSeguidas = 0;
@@ -1258,7 +1603,13 @@
           pausaHasta = 0;
           pintarDescargas();
         }
-        cortarCola = false;
+        // Cortar durante el respiro corta de verdad. Antes el pedido se perdía
+        // acá y la causa que seguía se bajaba igual.
+        if (cortarCola) {
+          cortarCola = false;
+          pintarDescargas();
+          continue;
+        }
         try {
           if (t.estado === 'en cola') {
             if (!t.acts) {
@@ -1294,11 +1645,15 @@
           guardarArchivo(r.bytes, t.archivo);
           t.estado = 'listo';
           hechasSeguidas++;
+          ultimaBajada = Date.now();
           textoTrabajo(t, 'Listo: ' + t.archivo + ', ' + plural(r.ok, 'documento', 'documentos') + (r.fallas ? '; ' + r.fallas + ' sin PDF real' : '') + '.', 1);
         } catch (e) {
           const msg = String(e && e.message ? e.message : e);
           if (msg === 'cortado') {
-            COLA.forEach((x) => { if (/en cola|abriendo|leyendo|bajando|a bajar/.test(x.estado)) { x.estado = 'cortado'; x.texto = 'Cortado por vos.'; } });
+            COLA.forEach((x) => {
+              if (x.creado > cortePedidoEn) return;   // encolada después del corte
+              if (/en cola|abriendo|leyendo|bajando|a bajar/.test(x.estado)) { x.estado = 'cortado'; x.texto = 'Cortado por vos.'; }
+            });
           } else {
             t.estado = 'error';
             t.texto = 'No se pudo: ' + mensajeDe(e) + '.';
@@ -1315,7 +1670,9 @@
     }
   }
 
-  const bajandoAlgo = () => colaCorriendo || COLA.some((t) => /en cola|abriendo|leyendo|bajando|a bajar/.test(t.estado));
+  // "eligiendo" también cuenta: es una lectura hecha que se pierde si la
+  // página cambia, y antes se iba sin avisar al arrancar una tanda de nota.
+  const bajandoAlgo = () => colaCorriendo || COLA.some((t) => EN_JUEGO.test(t.estado));
 
   // ------------------------------------------------------------- dejar nota
   //
@@ -1383,17 +1740,28 @@
   // falla -> "No se pudo realizar la acción de dejar nota ..."
   function mensajePJN() {
     const t = textoPJN(document).replace(/\s+/g, ' ');
-    const ok = /Ya se ha dejado nota[^]{0,80}?expediente:\s*([\d]+\/[\d]+)/i.exec(t);
+    // Se toma el número entero, con el incidente si lo trae (32733/1980/1): si se
+    // cortaba en dos tramos, la confirmación de un incidente se leía como la del
+    // expediente principal.
+    const ok = /Ya se ha dejado nota[^]{0,80}?expediente:\s*([\d]+\/[\d]+(?:\/[A-Z0-9]+)*)/i.exec(t);
     if (ok) return { ok: true, expediente: ok[1], texto: ok[0].slice(0, 120) };
     const mal = /No se pudo realizar la acci[^]{0,140}/i.exec(t);
     if (mal) return { ok: false, texto: mal[0].slice(0, 140) };
     return null;
   }
 
-  // "CIV 032733/1980" en la tabla y "32733/1980" en el mensaje.
+  // "CIV 032733/1980" en la tabla y "32733/1980" en el mensaje. El PJN suele
+  // mandar solo número y año; cuando además manda el incidente, se compara
+  // entero, para no dar por dejada en el principal una nota de su incidente.
   function mismoExpediente(deLaTabla, delMensaje) {
-    const n = (x) => String(x || '').replace(/^[A-Z]+\s*/i, '').replace(/^0+/, '').replace(/\s/g, '');
-    return n(deLaTabla).split('/').slice(0, 2).join('/') === n(delMensaje);
+    const n = (x) => String(x || '').replace(/^[A-Z]+\s*/i, '').replace(/\s/g, '').toUpperCase()
+      .split('/').map((p) => p.replace(/^0+(?=.)/, '')).join('/');
+    const tabla = n(deLaTabla).split('/');
+    const msg = n(delMensaje).split('/');
+    if (msg.length < 2 || !msg[0] || !msg[1]) return false;
+    const largo = Math.max(2, Math.min(msg.length, tabla.length));
+    if (msg.length > 2 && msg.length !== tabla.length) return false;
+    return tabla.slice(0, largo).join('/') === msg.slice(0, largo).join('/');
   }
 
   function esperarAjax(msMax) {
@@ -1501,7 +1869,8 @@
   // pestañas) con una ficha que cambia en cada paso. Una pestaña sigue solo si
   // su ficha es la del turno; justo antes de confirmar lo vuelve a mirar. Un
   // turno sin movimiento hace más de TURNO_VENCE no se retoma.
-  const K_TURNO = 'supjn_nota_turno';
+  const K_TURNO_BASE = 'supjn_nota_turno';
+  const K_TURNO = K_TURNO_BASE + (CUENTA ? '@' + CUENTA : '');
   const TURNO_VENCE = 3 * 60 * 1000;
   const leerTurno = () => {
     let t;
@@ -1523,11 +1892,27 @@
   const esMiTurno = (c, t) => !!(t && t.corrida === c.id && t.token === c.token);
   const otraTandaViva = () => { const t = leerTurno(); return !!(t && Date.now() - t.ts < TURNO_VENCE); };
 
+  // Mientras la tanda está en pausa (esta pestaña está mirando otra cosa del PJN)
+  // el turno se mantiene vivo. Sin esto, a los tres minutos la tanda se daba por
+  // abandonada y no seguía cuando el usuario volvía a Relacionados.
+  let latido = 0;
+  const pararLatido = () => { if (latido) { clearInterval(latido); latido = 0; } };
+  function latirTurno() {
+    pararLatido();
+    latido = setInterval(() => {
+      const a = leerCorrida();
+      const t = leerTurno();
+      if (!a || !a.activa || !t || !esMiTurno(a, t)) { pararLatido(); return; }
+      escribirTurno(a);
+    }, 30000);
+  }
+
   // solo: null deja nota en todas las habilitadas; si no, las claves elegidas.
   function nuevaCorrida(solo) {
     return {
       id: ficha(),
       token: ficha(),
+      cuenta: CUENTA,
       activa: true,
       solo: solo || null,
       hechos: [],
@@ -1545,11 +1930,13 @@
   function anotarResultado(e, ok, m) {
     refrescarNotas();
     NOTAS[e] = { f: hoyISO(), t: Date.now(), ok, m: m || '' };
-    guardarAlmacen(K_NOTAS, NOTAS);
+    guardarEnCuenta(K_NOTAS, NOTAS);
+    respaldarPronto();
   }
 
   // Esta pestaña deja de manejar la tanda (la sigue otra). No escribe resultados.
   function perderTurno(motivo) {
+    pararLatido();
     borrarSesion(S_CORRIDA);
     notaEnCurso = false;
     abortarNota = false;
@@ -1567,9 +1954,49 @@
     return c.solo ? c.hechos.length + ' de ' + c.solo.length : String(c.hechos.length);
   }
 
+  // Si algo falla en medio de un paso, la tanda se cierra con lo que se llegó a
+  // hacer. Antes quedaba trabada: notaEnCurso se quedaba en true, "Cortar" no
+  // hacía nada y no se podían bajar expedientes hasta recargar la página.
   async function pasoNota() {
+    try {
+      await pasoNotaInterno();
+    } catch (e) {
+      notaEnCurso = false;
+      const c = leerCorrida();
+      try {
+        if (c && c.activa) {
+          if (c.enCurso) {
+            const e0 = c.enCurso;
+            // Solo es "a verificar" si se llegó a confirmar. Si no, la nota no se
+            // dejó, y decir otra cosa sería afirmar algo que el PJN no recibió.
+            if (c.confirmado) { (c.dudas = c.dudas || []).push(e0); c.problemas.push(e0 + ': se confirmó y no se llegó a ver la respuesta del PJN'); }
+            else c.problemas.push(e0 + ': no se llegó a apretar Confirmar');
+            if (c.hechos.indexOf(e0) < 0) c.hechos.push(e0);
+            c.enCurso = null;
+          }
+          terminarNota(c, 'Se cortó la tanda: ' + mensajeDe(e) + '.');
+        } else {
+          avisar('No se pudo seguir dejando nota: ' + mensajeDe(e) + '.', true);
+        }
+      } catch (e2) {
+        borrarSesion(S_CORRIDA);
+        avisar('No se pudo seguir dejando nota: ' + mensajeDe(e) + '.', true);
+      }
+    }
+  }
+
+  async function pasoNotaInterno() {
     const c = leerCorrida();
     if (!c || !c.activa) return;
+    // La tanda es de la cuenta con la que se empezó. Si en esta pestaña se entró
+    // con otra, no se retoma ni se escribe nada: sus causas no son de esta cuenta.
+    if (!CUENTA || (c.cuenta && c.cuenta !== CUENTA)) {
+      borrarSesion(S_CORRIDA);
+      notaEnCurso = false;
+      pararLatido();
+      if (c.cuenta && CUENTA) avisar('Había una tanda de dejar nota de otra cuenta del PJN en esta pestaña: no se retoma.', true);
+      return;
+    }
     if (!c.dudas) c.dudas = [];
 
     // 0. Turno: ¿esta pestaña es la que maneja la tanda?
@@ -1785,12 +2212,14 @@
   // La tanda queda en pausa (sigue activa) mientras no se esté en Relacionados.
   function pausarNota() {
     notaEnCurso = false;
-    estadoNota('En pausa: esta página no es la lista de Relacionados del PJN. Volvé a Relacionados para seguir, o cortá la tanda.');
+    latirTurno();
+    estadoNota('En pausa: esta página no es la lista de Relacionados del PJN. La tanda te espera mientras esta pestaña siga abierta: volvé a Relacionados para seguir, o cortala.');
     pintarNota();
     if (VISTA === 'nota') pintarTodo();
   }
 
   function terminarNota(c, motivo) {
+    pararLatido();
     const dudas = c.dudas || [];
     const malos = {};
     c.problemas.forEach((p) => { const i = p.indexOf(': '); malos[p.slice(0, i)] = p.slice(i + 2); });
@@ -1804,10 +2233,24 @@
       // Lo anotado durante esta tanda (acá o en otra pestaña) ya es el resultado.
       const ya = NOTAS[e];
       if (ya && ya.t && ya.t >= (c.inicio || 0)) return;
-      NOTAS[e] = { f: hoy, t: ahora, ok: dudas.indexOf(e) >= 0 ? null : !malos[e], m: malos[e] || '' };
+      // Sin un resultado propio anotado, la nota queda "a verificar", nunca
+      // "dejada": darla por buena sería afirmar algo que el PJN no confirmó acá.
+      // Pasa con lo que hizo otra pestaña que no llegó a escribir su resultado.
+      const enDuda = dudas.indexOf(e) >= 0;
+      NOTAS[e] = { f: hoy, t: ahora, ok: (enDuda || !malos[e]) ? null : false,
+        m: malos[e] || 'no se vio la respuesta del PJN en esta pestaña' };
     });
-    noVistas.forEach((e) => { NOTAS[e] = { f: hoy, t: ahora, ok: false, m: 'no apareció con lápiz en la lista del PJN' }; });
-    guardarAlmacen(K_NOTAS, NOTAS);
+    // Una causa elegida que no apareció con lápiz y que hoy ya tenía nota dejada
+    // no es una falla: que el PJN le saque el lápiz es la consecuencia de la nota.
+    const yaEstaban = [];
+    const noSalieron = [];
+    noVistas.forEach((e) => {
+      const ya = NOTAS[e];
+      if (ya && ya.f === hoy && ya.ok !== false) { yaEstaban.push(e); return; }
+      NOTAS[e] = { f: hoy, t: ahora, ok: false, m: 'no apareció con lápiz en la lista del PJN' };
+      noSalieron.push(e);
+    });
+    guardarEnCuenta(K_NOTAS, NOTAS);
     borrarSesion(S_CORRIDA);
     soltarTurno(c);
     notaEnCurso = false;
@@ -1817,8 +2260,9 @@
     const detalle = (e) => e + (res(e).m ? ': ' + res(e).m : '');
     const ok = c.hechos.filter((e) => res(e).ok === true).length;
     const aVerificar = c.hechos.filter((e) => res(e).ok === null);
-    const fallas = c.hechos.filter((e) => res(e).ok === false).concat(noVistas);
+    const fallas = c.hechos.filter((e) => res(e).ok === false).concat(noSalieron);
     avisar((motivo ? motivo + ' ' : '') + 'Terminado: ' + plural(ok, 'nota dejada', 'notas dejadas') +
+      (yaEstaban.length ? '. ' + plural(yaEstaban.length, 'ya tenía', 'ya tenían') + ' nota dejada hoy y el PJN no le' + (yaEstaban.length > 1 ? 's' : '') + ' pone lápiz: ' + yaEstaban.join(' | ') : '') +
       (aVerificar.length ? '. A verificar en el expediente ' + aVerificar.length + ': ' + aVerificar.map(detalle).join(' | ') : '') +
       (fallas.length ? '. No salieron ' + fallas.length + ': ' + fallas.map(detalle).join(' | ') : '') + '.' +
       (popupAbierto() ? ' Quedó abierto el cartel del PJN: cerralo con Cancelar.' : ''), !!(fallas.length || aVerificar.length));
@@ -1910,21 +2354,25 @@
         if (!esObjeto(f)) return;
         const et = Array.isArray(f.et) ? f.et.filter((x) => typeof x === 'string') : [];
         const nota = typeof f.nota === 'string' ? f.nota : '';
-        if (et.length || nota.trim()) out.filas[k] = { et, nota };
+        // t: cuándo se tocó por última vez. Sirve para saber, entre dos PC con la
+        // misma carpeta, cuál apunte es el nuevo. Lo viejo no lo tiene y se lo trata aparte.
+        const t = typeof f.t === 'number' && f.t > 0 ? f.t : 0;
+        if (et.length || nota.trim()) out.filas[k] = t ? { et, nota, t } : { et, nota };
       });
     }
     return out;
   }
 
-  let MARCAS = normalizarMarcas(leerAlmacen(K_MARCAS, null));
-  let RESPALDO = leerAlmacen(K_RESPALDO, null);
+  let MARCAS = normalizarMarcas(leerDeCuenta(K_MARCAS, null));
+  let RESPALDO = leerDeCuenta(K_RESPALDO, null);
   // Con dos pestañas abiertas cada una tiene su copia en memoria. Antes de
   // cambiar algo se vuelve a leer lo guardado: si no, la última pestaña que
   // guarda borra lo que anotó la otra.
-  const refrescarMarcas = () => { MARCAS = normalizarMarcas(leerAlmacen(K_MARCAS, null)); RESPALDO = leerAlmacen(K_RESPALDO, null); };
+  const refrescarMarcas = () => { MARCAS = normalizarMarcas(leerDeCuenta(K_MARCAS, null)); RESPALDO = leerDeCuenta(K_RESPALDO, null); };
 
   const guardarMarcas = () => {
-    if (!guardarAlmacen(K_MARCAS, MARCAS)) avisar('No se pudieron guardar las etiquetas y los apuntes.', true);
+    if (!guardarEnCuenta(K_MARCAS, MARCAS)) avisar(CUENTA ? 'No se pudieron guardar las etiquetas y los apuntes.' : SIN_CUENTA, true);
+    respaldarPronto();
   };
   const marcaDe = (k) => MARCAS.filas[k] || { et: [], nota: '' };
   const etiquetaDe = (id) => MARCAS.etiquetas.find((e) => e.id === id);
@@ -1932,9 +2380,14 @@
 
   function fijarMarca(k, cambio) {
     refrescarMarcas();
-    const m = Object.assign({ et: [], nota: '' }, MARCAS.filas[k] || {}, cambio);
+    const ant = MARCAS.filas[k] || {};
+    const m = Object.assign({ et: [], nota: '' }, ant, cambio);
     if (!m.et.length && !String(m.nota || '').trim()) delete MARCAS.filas[k];
-    else MARCAS.filas[k] = { et: m.et, nota: m.nota };
+    else {
+      const cambioElApunte = String(m.nota || '') !== String(ant.nota || '');
+      const t = cambioElApunte ? Date.now() : (ant.t || 0);
+      MARCAS.filas[k] = t ? { et: m.et, nota: m.nota, t } : { et: m.et, nota: m.nota };
+    }
     guardarMarcas();
   }
 
@@ -1975,17 +2428,252 @@
     refrescarMarcas();
     refrescarNotas();
     guardarArchivo(JSON.stringify({
-      formato: 'supjn+/marcas', version: 2, fecha: new Date().toISOString(),
+      formato: 'supjn+/marcas', version: 2, fecha: new Date().toISOString(), cuenta: CUENTA,
       etiquetas: MARCAS.etiquetas, filas: MARCAS.filas, notas: NOTAS
     }, null, 1), 'SuPJN+-etiquetas-' + selloArchivo() + '.json', 'application/json');
     RESPALDO = { fecha: Date.now() };
-    guardarAlmacen(K_RESPALDO, RESPALDO);
+    guardarEnCuenta(K_RESPALDO, RESPALDO);
+  }
+
+  // ------------------------------------------------- carpeta de respaldo
+  //
+  // El navegador no deja escribir en el disco por su cuenta: la carpeta la elige
+  // el usuario una vez y Chrome guarda el permiso. La carpeta conviene que esté
+  // lejos de la del programa (por ejemplo en OneDrive o en el Drive), para que
+  // los apuntes no terminen en un repositorio.
+
+  // Un archivo por cuenta: en la misma carpeta pueden convivir dos cuentas sin
+  // pisarse, y el de una cuenta no se importa en la otra. El nombre lleva la
+  // cuenta abreviada y no el número entero, que ya va adentro del archivo.
+  const archivoRespaldo = () => 'SuPJN+-datos-' + CUENTA + '.json';
+  let CARPETA = null;            // la carpeta elegida (handle del navegador)
+  let carpetaEstado = 'nada';    // nada | lista | pedir | falta | error
+  let carpetaTexto = '';
+  let carpetaAviso = '';         // por qué falló la última vez, en castellano
+
+  const ventana = () => (typeof unsafeWindow !== 'undefined' && unsafeWindow) || window;
+
+  // Si el almacén del navegador no contesta, no se cuelga la app: se sigue sin
+  // carpeta y el respaldo queda a mano.
+  function abrirIDB() {
+    return new Promise((res, rej) => {
+      let p;
+      try { p = ventana().indexedDB.open('supjn', 1); } catch (e) { rej(e); return; }
+      let listo = false;
+      const corte = setTimeout(() => { if (!listo) { listo = true; rej(new Error('el navegador no contesta con su almacén')); } }, 8000);
+      const fin = (f) => (v) => { if (listo) return; listo = true; clearTimeout(corte); f(v); };
+      const bien = fin((v) => res(v));
+      const mal = fin((e) => rej(e));
+      p.onupgradeneeded = () => { try { p.result.createObjectStore('carpeta'); } catch (e) { /* ya estaba */ } };
+      p.onsuccess = () => bien(p.result);
+      p.onerror = () => mal(p.error || new Error('no se pudo abrir el almacén'));
+      p.onblocked = () => mal(new Error('otra pestaña de SuPJN+ está usando el almacén'));
+    });
+  }
+
+  async function guardarCarpetaEn(h) {
+    const db = await abrirIDB();
+    return new Promise((res, rej) => {
+      const tx = db.transaction('carpeta', 'readwrite');
+      tx.objectStore('carpeta').put(h, 'respaldo');
+      tx.oncomplete = () => res(true);
+      tx.onerror = () => rej(tx.error);
+    });
+  }
+
+  async function leerCarpetaGuardada() {
+    try {
+      const db = await abrirIDB();
+      return await new Promise((res) => {
+        const tx = db.transaction('carpeta', 'readonly');
+        const r = tx.objectStore('carpeta').get('respaldo');
+        r.onsuccess = () => res(r.result || null);
+        r.onerror = () => res(null);
+      });
+    } catch (e) { return null; }
+  }
+
+  async function permisoCarpeta(h, pedir) {
+    if (!h || typeof h.queryPermission !== 'function') return false;
+    const o = { mode: 'readwrite' };
+    try {
+      if ((await h.queryPermission(o)) === 'granted') return true;
+      if (!pedir) return false;
+      return (await h.requestPermission(o)) === 'granted';
+    } catch (e) { return false; }
+  }
+
+  const datosRespaldo = () => {
+    refrescarMarcas();
+    refrescarNotas();
+    return JSON.stringify({
+      formato: 'supjn+/marcas', version: 2, fecha: new Date().toISOString(), cuenta: CUENTA,
+      etiquetas: MARCAS.etiquetas, filas: MARCAS.filas, notas: NOTAS
+    }, null, 1);
+  };
+
+  // Una escritura por vez. Si se pide otra mientras una está en curso (el guardado
+  // automático y el botón Guardar ahora, por ejemplo), espera a la anterior: dos
+  // escrituras a la vez sobre el mismo archivo las rechaza el navegador.
+  let leyoLaCarpeta = false;     // recién después de leerla se la puede pisar
+  let colaRespaldo = Promise.resolve(false);
+  function escribirEnCarpeta() {
+    const turno = colaRespaldo.then(escribirAhora, escribirAhora);
+    colaRespaldo = turno.catch(() => false);
+    return turno;
+  }
+
+  async function escribirAhora() {
+    if (!CARPETA) return false;
+    if (!CUENTA) { carpetaAviso = 'no pude identificar la cuenta del PJN'; return false; }
+    // Nunca se escribe antes de haber leído lo que hay en la carpeta. Si no, una
+    // limpieza del navegador dejaría la copia buena pisada por una vacía.
+    if (!leyoLaCarpeta) { carpetaAviso = 'todavía estoy leyendo lo que hay en la carpeta'; return false; }
+    if (!(await permisoCarpeta(CARPETA, false))) {
+      carpetaEstado = 'pedir';
+      carpetaAviso = 'Chrome pide confirmar otra vez el permiso de la carpeta.';
+      return false;
+    }
+    const texto = datosRespaldo();
+    let w = null;
+    try {
+      const fh = await CARPETA.getFileHandle(archivoRespaldo(), { create: true });
+      w = await fh.createWritable();
+      await w.write(texto);
+      await w.close();
+      w = null;
+    } catch (e) {
+      // Si quedó a medias, se descarta: el navegador escribe en un archivo aparte
+      // y recién al cerrar lo pone en su lugar, así que el anterior queda entero.
+      if (w) { try { await w.abort(); } catch (e2) { /* ya estaba cerrado */ } }
+      const n = String((e && e.name) || '');
+      if (/NotFound/i.test(n)) {
+        carpetaEstado = 'falta';
+        carpetaAviso = 'No encuentro la carpeta: puede haberse movido, cambiado de nombre o estar sin bajar de la nube.';
+      } else if (/NotAllowed|Security/i.test(n)) {
+        carpetaEstado = 'pedir';
+        carpetaAviso = 'Chrome pide confirmar otra vez el permiso de la carpeta.';
+      } else {
+        carpetaEstado = 'error';
+        carpetaAviso = mensajeDe(e);
+      }
+      return false;
+    }
+    RESPALDO = { fecha: Date.now(), auto: true };
+    guardarEnCuenta(K_RESPALDO, RESPALDO);
+    carpetaEstado = 'lista';
+    carpetaAviso = '';
+    return true;
+  }
+
+  // Guardado automático, sin apurar: se junta lo que haya cambiado en unos segundos.
+  let tRespaldo = 0;
+  let respaldoPendiente = false;
+  function respaldarPronto() {
+    if (!CARPETA) return;
+    respaldoPendiente = true;
+    clearTimeout(tRespaldo);
+    tRespaldo = setTimeout(respaldarYa, 4000);
+  }
+
+  // Lo que esté esperando se guarda ya. Se llama también al irse de la pestaña,
+  // para no perder lo último anotado.
+  function respaldarYa() {
+    clearTimeout(tRespaldo);
+    if (!respaldoPendiente || !CARPETA) return;
+    respaldoPendiente = false;
+    escribirEnCarpeta()
+      .then((ok) => { if (!ok) respaldoPendiente = true; pintarCopia(); })
+      .catch(() => { respaldoPendiente = true; carpetaEstado = 'error'; carpetaAviso = 'No se pudo guardar en la carpeta.'; pintarCopia(); });
+  }
+
+  async function importarDeCarpeta() {
+    if (!CARPETA || !CUENTA) return null;
+    if (!(await permisoCarpeta(CARPETA, false))) return null;
+    try {
+      const fh = await CARPETA.getFileHandle(archivoRespaldo());
+      const f = await fh.getFile();
+      const texto = await f.text();
+      // Solo se importa solo lo que dice ser de esta cuenta. Un archivo sin
+      // cuenta adentro es de una versión anterior: se trae con Importar, a mano.
+      let d = null;
+      try { d = JSON.parse(texto); } catch (e2) { d = null; }
+      if (!d || d.cuenta !== CUENTA) {
+        if (d) carpetaAviso = 'el archivo de la carpeta no dice ser de esta cuenta, así que no lo importé solo';
+        return null;
+      }
+      const r = importarMarcas(texto);
+      return typeof r === 'string' ? null : r;
+    } catch (e) { return null; }   // todavía no hay archivo
+  }
+
+  // Elegir la carpeta: la pide el navegador y tiene que salir de un clic.
+  async function elegirCarpeta() {
+    const w = ventana();
+    if (typeof w.showDirectoryPicker !== 'function') throw new Error('este navegador no deja elegir una carpeta: usá Exportar e Importar a mano');
+    const h = await w.showDirectoryPicker({ id: 'supjn-respaldo', mode: 'readwrite', startIn: 'documents' });
+    // Si la carpeta es un repositorio, los apuntes podrían terminar publicados.
+    let git = false;
+    try {
+      if (typeof h.entries === 'function') {
+        for await (const par of h.entries()) { if (par[0] === '.git') { git = true; break; } }
+      }
+    } catch (e) { /* si no se puede mirar, se sigue igual */ }
+    await guardarCarpetaEn(h);
+    CARPETA = h;
+    leyoLaCarpeta = false;       // a la carpeta nueva se la lee antes de escribirla
+    carpetaEstado = 'lista';
+    carpetaAviso = '';
+    carpetaTexto = h.name || 'la carpeta elegida';
+    return { git, nombre: carpetaTexto };
+  }
+
+  // Al arrancar: si ya había una carpeta elegida y el permiso sigue en pie, se lee
+  // lo que haya y se guarda lo de acá.
+  async function conectarCarpeta(pedir) {
+    try {
+      if (!CARPETA) CARPETA = await leerCarpetaGuardada();
+      if (!CARPETA) { carpetaEstado = 'nada'; return false; }
+      carpetaTexto = CARPETA.name || 'la carpeta elegida';
+      if (!(await permisoCarpeta(CARPETA, !!pedir))) {
+        carpetaEstado = 'pedir';
+        carpetaAviso = 'Chrome pide confirmar otra vez el permiso de la carpeta.';
+        return false;
+      }
+      carpetaEstado = 'lista';
+      carpetaAviso = '';
+      const r = await importarDeCarpeta();
+      leyoLaCarpeta = true;
+      await escribirEnCarpeta();
+      return r || true;
+    } catch (e) {
+      carpetaEstado = 'error';
+      carpetaAviso = mensajeDe(e);
+      return false;
+    }
+  }
+
+  // Solo para el banco de pruebas: pone una carpeta de mentira, para probar la
+  // escritura sin pedirle nada al disco ni al usuario.
+  function ponerCarpetaDePrueba(h, leida) {
+    CARPETA = h;
+    leyoLaCarpeta = !!leida;
+    carpetaEstado = h ? 'lista' : 'nada';
+    carpetaAviso = '';
+    colaRespaldo = Promise.resolve(false);
   }
 
   function importarMarcas(texto) {
     let d;
     try { d = JSON.parse(texto); } catch (e) { return 'El archivo no es un JSON válido.'; }
     if (!d || d.formato !== 'supjn+/marcas' || !d.filas || typeof d.filas !== 'object') return 'El archivo no es una exportación de SuPJN+.';
+    // Un archivo de otra cuenta no se importa: son causas de otro y mezclarlas
+    // es justamente lo que hay que evitar. Sin cuenta identificada tampoco, que
+    // es lo mismo pero a ciegas.
+    if (!CUENTA) return 'No pude identificar con qué cuenta del PJN entraste, así que no importo nada: no quiero mezclar los datos de dos cuentas.';
+    if (d.cuenta && d.cuenta !== CUENTA) {
+      return 'Ese archivo es de la cuenta ' + d.cuenta + ' y ahora estás con la ' + CUENTA + '. No lo importo para no mezclar datos de dos cuentas.';
+    }
     refrescarMarcas();
     const mapa = {};
     (d.etiquetas || []).forEach((e) => {
@@ -2002,10 +2690,23 @@
         const id = mapa[x] || x;
         if (etiquetaDe(id) && et.indexOf(id) < 0) et.push(id);
       });
+      // Apuntes: si las dos partes saben cuándo se tocaron, gana el más nuevo (es
+      // el caso de la carpeta compartida, que se importa sola cada vez que se abre:
+      // si se pegaran, el apunte crecería solo en cada sincronización). Cuando
+      // alguno viene de una copia vieja, sin fecha, se conservan los dos.
       let nota = aca.nota || '';
+      let t = aca.t || 0;
       const otra = String(orig.nota || '').trim();
-      if (otra && otra !== nota.trim()) nota = nota ? nota + '\n\n' + otra : otra;
-      if (et.length || nota.trim()) { MARCAS.filas[k] = { et, nota }; filas++; }
+      const tOtra = typeof orig.t === 'number' && orig.t > 0 ? orig.t : 0;
+      if (otra && otra !== nota.trim()) {
+        if (t && tOtra) {
+          if (tOtra > t) { nota = otra; t = tOtra; }
+        } else {
+          nota = nota ? nota + '\n\n' + otra : otra;
+          t = Math.max(t, tOtra);
+        }
+      } else if (tOtra > t) { t = tOtra; }
+      if (et.length || nota.trim()) { MARCAS.filas[k] = t ? { et, nota, t } : { et, nota }; filas++; }
     });
     guardarMarcas();
     // El registro de dejar nota también viaja en la copia: de cada causa queda
@@ -2020,7 +2721,7 @@
         NOTAS[k] = otra;
         notas++;
       });
-      guardarAlmacen(K_NOTAS, NOTAS);
+      guardarEnCuenta(K_NOTAS, NOTAS);
     }
     return { filas, etiquetas: MARCAS.etiquetas.length, notas };
   }
@@ -2037,7 +2738,26 @@
       enTramite: causas.filter((c) => c.tramite).length
     });
   };
-  const DATOS = { rel: validarDatos(leerAlmacen(K_REL, null)), fav: validarDatos(leerAlmacen(K_FAV, null)) };
+  const DATOS = { rel: validarDatos(leerDeCuenta(K_REL, null)), fav: validarDatos(leerDeCuenta(K_FAV, null)) };
+  // Por si al arrancar todavía no estaba el encabezado: se vuelve a mirar la
+  // cuenta y, si apareció o cambió, se relee todo lo de esa cuenta. Nunca se
+  // muestra lo de una cuenta en la sesión de otra.
+  function revisarCuenta() {
+    const antes = CUENTA;
+    resolverCuenta();
+    if (CUENTA === antes) return false;
+    migrarACuenta();
+    DATOS.rel = validarDatos(leerDeCuenta(K_REL, null));
+    DATOS.fav = validarDatos(leerDeCuenta(K_FAV, null));
+    indexar('rel');
+    indexar('fav');
+    refrescarMarcas();
+    refrescarNotas();
+    refrescarHoras();
+    refrescarVisto();
+    return true;
+  }
+
   const INDICE = { rel: new Map(), fav: new Map() };
   function indexar(tipo) {
     INDICE[tipo] = new Map();
@@ -2058,11 +2778,129 @@
     });
     return out;
   }
-  let NOTAS = normalizarNotas(leerAlmacen(K_NOTAS, {}));
-  const refrescarNotas = () => { NOTAS = normalizarNotas(leerAlmacen(K_NOTAS, {})); };
+  let NOTAS = normalizarNotas(leerDeCuenta(K_NOTAS, {}));
+  const refrescarNotas = () => { NOTAS = normalizarNotas(leerDeCuenta(K_NOTAS, {})); };
 
-  // Las partes de una causa. Hoy salen de la carátula; cuando se lean los
-  // intervinientes de verdad, se van a tomar de ahí.
+  // Hora del último documento firmado, por causa:
+  // { exp: { f: 'dd/mm/aaaa', hh: 'HH:MM', t, origen } }
+  function normalizarHoras(h) {
+    const out = {};
+    if (!esObjeto(h)) return out;
+    Object.keys(h).forEach((k) => {
+      const v = h[k];
+      if (!esObjeto(v)) return;
+      const pedida = typeof v.pedida === 'string' ? v.pedida : '';
+      const hayHora = /^\d{2}\/\d{2}\/\d{4}$/.test(v.f || '') && /^\d{2}:\d{2}$/.test(v.hh || '');
+      // Sin hora pero con "pedida" es una causa que ya se probó y no dio: queda
+      // anotada para no volver a bajarle el documento en cada vuelta.
+      if (!hayHora && !pedida) return;
+      out[k] = { f: hayHora ? v.f : '', hh: hayHora ? v.hh : '', t: typeof v.t === 'number' ? v.t : 0,
+        origen: typeof v.origen === 'string' ? v.origen : '', pedida };
+    });
+    return out;
+  }
+  let HORAS = normalizarHoras(leerDeCuenta(K_HORAS, {}));
+  const refrescarHoras = () => { HORAS = normalizarHoras(leerDeCuenta(K_HORAS, {})); };
+  function guardarHora(k, dato) {
+    refrescarHoras();
+    HORAS[k] = dato;
+    guardarEnCuenta(K_HORAS, HORAS);
+  }
+
+  // ------------------------------------------------------------ novedades
+  //
+  // El PJN no avisa nada. SuPJN+ guarda cómo estaba cada causa la última vez que
+  // la miraste y marca las que se movieron desde entonces. Una causa deja de ser
+  // novedad cuando la abrís, o con "Marcar todo como visto".
+
+  function normalizarVisto(v) {
+    const out = {};
+    if (!esObjeto(v)) return out;
+    Object.keys(v).forEach((k) => {
+      const x = v[k];
+      if (!esObjeto(x) || typeof x.ult !== 'string') return;
+      out[k] = { ult: x.ult, sit: typeof x.sit === 'string' ? x.sit : '', t: typeof x.t === 'number' ? x.t : 0 };
+    });
+    return out;
+  }
+  let VISTO = normalizarVisto(leerDeCuenta(K_VISTO, {}));
+  // Se pregunta una vez por fila al dibujar la tabla: contar las claves cada vez
+  // se nota con muchas causas guardadas.
+  let HAY_FOTO = Object.keys(VISTO).length > 0;
+  const refrescarVisto = () => { VISTO = normalizarVisto(leerDeCuenta(K_VISTO, {})); HAY_FOTO = Object.keys(VISTO).length > 0; };
+  const hayFoto = () => HAY_FOTO;
+
+  function marcarVisto(claves) {
+    refrescarVisto();
+    const ahora = Date.now();
+    (Array.isArray(claves) ? claves : [claves]).forEach((k) => {
+      const c = causaPorClave(k);
+      if (!c) return;
+      VISTO[c.exp] = { ult: c.ult, sit: c.sit, t: ahora };
+    });
+    HAY_FOTO = Object.keys(VISTO).length > 0;
+    guardarVisto();
+  }
+
+  // La foto completa: todo lo leído pasa a estar visto.
+  function fotoVisto() {
+    refrescarVisto();
+    const ahora = Date.now();
+    ['rel', 'fav'].forEach((t) => {
+      if (!DATOS[t]) return;
+      DATOS[t].causas.forEach((c) => { VISTO[c.exp] = { ult: c.ult, sit: c.sit, t: ahora }; });
+    });
+    HAY_FOTO = Object.keys(VISTO).length > 0;
+    guardarVisto();
+  }
+
+  // Al guardar se sacan las causas que ya no están en ninguna de las dos listas
+  // (archivadas, sacadas de Favoritos): si no, el almacén crece para siempre y,
+  // cuando se llena, las novedades dejan de limpiarse sin decir nada.
+  function guardarVisto() {
+    // Se poda lo que ya no está en ninguna de las dos listas y además hace más de
+    // medio año que no se toca. Las dos condiciones juntas: por ausencia sola, una
+    // lectura recortada del PJN borraría la línea de partida; por antigüedad sola,
+    // una causa dormida volvería a aparecer como novedad sin haberse movido.
+    if (DATOS.rel && DATOS.fav) {
+      const vivas = {};
+      ['rel', 'fav'].forEach((t) => DATOS[t].causas.forEach((c) => { vivas[c.exp] = true; }));
+      const limite = Date.now() - 180 * 24 * 60 * 60 * 1000;
+      Object.keys(VISTO).forEach((k) => { const v = VISTO[k]; if (!vivas[k] && v && v.t && v.t < limite) delete VISTO[k]; });
+      HAY_FOTO = Object.keys(VISTO).length > 0;
+    }
+    if (!guardarEnCuenta(K_VISTO, VISTO)) avisar(CUENTA ? 'No se pudieron guardar las novedades: el almacén del navegador está lleno.' : SIN_CUENTA, true);
+  }
+
+  // Sin foto previa no hay novedades: la primera lectura es la línea de partida.
+  // Si la causa se dio por vista después de leída la lista, no es novedad aunque
+  // lo guardado no coincida: pasa con una causa que está en Mis causas y en
+  // Favoritos y las dos listas se leyeron en momentos distintos. Sin esto,
+  // "Marcar todo como visto" decía "listo" y la pastilla quedaba igual.
+  function esNovedad(c, fechaLista) {
+    if (!hayFoto()) return false;
+    const v = VISTO[c.exp];
+    if (!v) return true;                       // causa nueva en la lista
+    const f = fechaLista || (datosVista() || {}).fecha || 0;
+    if (v.t && f && v.t >= f) return false;
+    return v.ult !== c.ult || v.sit !== c.sit;
+  }
+
+  // Se cuenta sobre lo que se está viendo (con la búsqueda y los filtros puestos),
+  // para que el número del botón sea el de las filas que van a aparecer.
+  const contarNovedades = () => {
+    const D = datosVista();
+    if (!D) return 0;
+    if (!CFG.texto && !CFG.fuero && !CFG.sit && !CFG.etiqueta && !CFG.desde && !CFG.hasta && CFG.tramite === 'todas') {
+      return D.causas.filter((c) => esNovedad(c, D.fecha)).length;
+    }
+    const antes = CFG.novedades;
+    CFG.novedades = false;
+    try { return filtradas().filter((c) => esNovedad(c, D.fecha)).length; } finally { CFG.novedades = antes; }
+  };
+
+  // Las partes de una causa. En la lista salen de la carátula, que es lo único
+  // que manda el PJN; adentro del expediente salen de la solapa Intervinientes.
   const partesDe = (c) => partesDeCaratula(c.exp, c.car);
 
   const causaEn = (tipo, k) => INDICE[tipo].get(k) || null;
@@ -2106,7 +2944,7 @@
 
   const CFG_DEF = {
     vista: 'rel', texto: '', fuero: '', sit: '', tramite: 'todas', etiqueta: '', desde: '', hasta: '',
-    orden: { col: 'ult', desc: true }, porPagina: 25, maxi: false,
+    orden: { col: 'ult', desc: true }, porPagina: 25, maxi: false, novedades: false,
     cols: null, ocultas: [], anchos: {}, pausaNota: 700, tam: {},
     colsAct: null, ocultasAct: [], anchosAct: {}, ordenAct: { col: '', desc: true },
     zoom: 1, encuadrar: true
@@ -2117,7 +2955,9 @@
   if (!CFG_GUARDADA.cols && CFG.orden && CFG.orden.col === 'nota') CFG.orden = { col: 'anot', desc: CFG.orden.desc };
   if (!CFG_GUARDADA.cols && CFG.etiqueta === '@nota') CFG.etiqueta = '@anot';
   if (!CFG_GUARDADA.cols) CFG.cols = COLS_DEF.map((c) => c.k);
-  if (!CFG.orden || !COL[CFG.orden.col]) CFG.orden = { col: 'ult', desc: true };
+  // La columna vacía es Orden PJN y vale: sin esto, al recargar la página el
+  // orden elegido se perdía y volvía al cronológico.
+  if (!CFG.orden || (CFG.orden.col !== '' && !COL[CFG.orden.col])) CFG.orden = { col: 'ult', desc: true };
   if (!Array.isArray(CFG.ocultas)) CFG.ocultas = [];
   // Las columnas que trae una versión nueva nacen apagadas: se prenden en
   // Columnas, y a nadie se le reacomoda la tabla sola al actualizar.
@@ -2127,6 +2967,7 @@
   });
   // Una sola vez: Etiquetas queda pegada a Expediente y Partes al lado de
   // Carátula. Después, cada columna queda donde el usuario la deje.
+  let migroAlgo = false;
   if (!(CFG.mig >= 1)) {
     if (Array.isArray(CFG.cols)) {
       CFG.cols = CFG.cols.filter((k) => k !== 'et' && k !== 'partes');
@@ -2136,12 +2977,14 @@
       CFG.ocultas = CFG.ocultas.filter((k) => k !== 'partes');
     }
     CFG.mig = 1;
+    migroAlgo = true;
   }
   // Una sola vez: el orden de la app vuelve a ser el del PJN, por última
   // actuación y de la más nueva a la más vieja.
   if (!(CFG.mig >= 2)) {
     CFG.orden = { col: 'ult', desc: true };
     CFG.mig = 2;
+    migroAlgo = true;
   }
   if (!CFG.anchos || typeof CFG.anchos !== 'object') CFG.anchos = {};
   if (!esObjeto(CFG.tam)) CFG.tam = {};
@@ -2152,12 +2995,19 @@
   if ([10, 15, 20, 25, 30, 40, 50, 75, 100].indexOf(Number(CFG.porPagina)) < 0) CFG.porPagina = 25;
   CFG.porPagina = Number(CFG.porPagina);
   ['texto', 'fuero', 'sit', 'etiqueta', 'desde', 'hasta'].forEach((k) => { if (typeof CFG[k] !== 'string') CFG[k] = ''; });
+  // Lo que se escribe en el buscador no se guarda: puede ser el nombre de un
+  // cliente y la configuración es común a todas las cuentas.
+  CFG.texto = '';
   if (['todas', 'si', 'no'].indexOf(CFG.tramite) < 0) CFG.tramite = 'todas';
   if (!esObjeto(CFG.anchos)) CFG.anchos = {};
   CFG.encuadrar = CFG.encuadrar !== false;
+  CFG.novedades = CFG.novedades === true;
   CFG.maxi = CFG.maxi === true;
   if (!Array.isArray(CFG.ocultasAct)) CFG.ocultasAct = [];
   if (!CFG.anchosAct || typeof CFG.anchosAct !== 'object') CFG.anchosAct = {};
+  // Las migraciones se guardan ya, con todo lo demás ya revisado. Si no, vuelven
+  // a correr en cada carga y le pisan al usuario el orden que haya elegido.
+  if (migroAlgo) guardarAlmacen(K_CFG, CFG);
   if (!CFG.ordenAct || typeof CFG.ordenAct !== 'object' || (CFG.ordenAct.col && !COLS_ACT_DEF.some((c) => c.k === CFG.ordenAct.col))) CFG.ordenAct = { col: '', desc: true };
   const guardarCfg = () => guardarAlmacen(K_CFG, CFG);
 
@@ -2240,14 +3090,41 @@
     if (m) NOMBRES_FUERO[m[1]] = m[2];
   });
 
+  // Los días en los que se sabe la hora de todas las causas que empatan. Se
+  // recalcula antes de cada orden, sobre las causas que se están mirando.
+  let FECHAS_CON_HORA = {};
+  function marcarFechasConHora(lista) {
+    const cuenta = {};
+    lista.forEach((c) => {
+      const f = c.ult;
+      if (!numFecha(f)) return;
+      if (!cuenta[f]) cuenta[f] = { total: 0, conHora: 0 };
+      cuenta[f].total++;
+      const h = HORAS[c.exp];
+      if (h && h.f === f) cuenta[f].conHora++;
+    });
+    FECHAS_CON_HORA = {};
+    Object.keys(cuenta).forEach((f) => { if (cuenta[f].conHora === cuenta[f].total) FECHAS_CON_HORA[f] = true; });
+  }
+
   function valorOrden(c, k) {
     // Sin columna: como vino del PJN (el orden de lectura, que la tabla conserva).
     if (!k) return '';
     if (k === 'exp') return ordenExp(c.exp);
     if (k === 'partes') { const p = partesDe(c); return norm(p.map((x) => x.nombre).join(' ')); }
     // Con la fecha empatada, se respeta el orden del PJN (que desempata por la
-    // hora, que no muestra). Va invertido porque el orden normal es descendente.
-    if (k === 'ult') return String(numFecha(c.ult)).padStart(8, '0') + '|' + String(999999 - (c.pos || 0)).padStart(6, '0');
+    // hora, que no muestra). Si se está mirando solo lo que está en trámite, se
+    // copia el orden de esa lista del PJN, que es la que se ve en el sitio. Va
+    // invertido porque el orden normal es descendente.
+    if (k === 'ult') {
+      const p = (CFG.tramite === 'si' && c.posTramite != null) ? c.posTramite : (c.pos != null ? c.pos : (c.posTramite || 0));
+      // La hora manda solo si se la sabe de TODAS las causas de ese día. Con
+      // algunas sabidas y otras no, las sabidas saltarían en bloque arriba de las
+      // demás y el orden saldría peor que el del PJN: en ese caso se deja el del PJN.
+      const h = FECHAS_CON_HORA[c.ult] ? HORAS[c.exp] : null;
+      const hh = (h && h.f === c.ult) ? h.hh : '00:00';
+      return String(numFecha(c.ult)).padStart(8, '0') + '|' + hh + '|' + String(999999 - p).padStart(6, '0');
+    }
     if (k === 'et') return norm(etiquetasDe(c.exp).map((e) => e.nom).join(' '));
     if (k === 'anot') return norm(marcaDe(c.exp).nota);
     if (k === 'nota') { const n = NOTAS[c.exp]; return n ? n.f + (n.ok === true ? '2' : n.ok === null ? '1' : '0') : ''; }
@@ -2263,6 +3140,7 @@
       if (CFG.fuero === '@sin' ? !!fueroDe(c.exp) : (CFG.fuero && fueroDe(c.exp) !== CFG.fuero)) return false;
       if (CFG.sit && c.sit !== CFG.sit) return false;
       if (CFG.tramite === 'si' && !c.tramite) return false;
+      if (CFG.novedades && !esNovedad(c)) return false;
       if (CFG.tramite === 'no' && c.tramite) return false;
       if (desde || hasta) {
         const f = numFecha(c.ult);
@@ -2280,6 +3158,7 @@
       return true;
     });
     const { col, desc } = CFG.orden;
+    marcarFechasConHora(D.causas);
     L.sort((a, b) => {
       const x = valorOrden(a, col), y = valorOrden(b, col);
       return (x < y ? -1 : x > y ? 1 : 0) * (desc ? -1 : 1);
@@ -2307,17 +3186,20 @@
     '#supjn h2,#supjn h3,#supjn h4{font-family:"Segoe UI",Arial,sans-serif;line-height:1.3}',
     '#supjn p{font-size:13px}',
     '.sj-tit{display:flex;align-items:center;gap:10px;background:' + AZUL + ';color:#fff;height:38px;padding:0 6px 0 14px;flex:none;user-select:none;cursor:move}',
-    '.sj-tit b{letter-spacing:.03em;font-size:14px}',
-    '.sj-tit .v{opacity:.7;font-size:11px}',
-    '.sj-tit .fn{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.28);color:#fff;border-radius:5px;height:26px;padding:0 10px;cursor:pointer;font:600 12px "Segoe UI",Arial,sans-serif}',
+    '.sj-tit b{letter-spacing:.03em;font-size:14px;flex:none}',
+    '.sj-tit .v{opacity:.7;font-size:11px;flex:0 1 auto;min-width:0;overflow:hidden;white-space:nowrap}',
+    '.sj-tit .fn{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.28);color:#fff;border-radius:5px;height:26px;padding:0 10px;cursor:pointer;font:600 12px "Segoe UI",Arial,sans-serif;flex:0 1 auto;min-width:0;overflow:hidden;white-space:nowrap}',
+    '.sj-tit .cta{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.28);border-radius:5px;height:26px;display:inline-flex;align-items:center;padding:0 8px;font:600 11px "Segoe UI",Arial,sans-serif;letter-spacing:.3px;white-space:nowrap;flex:0 1 auto;min-width:0;max-width:230px;overflow:hidden;text-overflow:ellipsis;gap:5px}',
+    '.sj-tit .cta::before{content:"\\1F464";font-size:12px;opacity:.9}',
+    '.sj-tit .cta.sin{background:#8c1d18;border-color:#a83a33}',
     '.sj-tit .fn:hover{background:rgba(255,255,255,.26)}',
     '.sj-tit .fn.peligro{background:#b3261e;border-color:#b3261e}',
-    '.sj-tit .zm{margin-left:auto;display:flex;align-items:center;gap:1px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.24);border-radius:5px;padding:1px}',
+    '.sj-tit .zm{flex:none;margin-left:auto;display:flex;align-items:center;gap:1px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.24);border-radius:5px;padding:1px}',
     '.sj-tit .zm button{background:transparent;border:0;color:#fff;height:22px;min-width:24px;padding:0 4px;border-radius:4px;cursor:pointer;font:600 13px/1 "Segoe UI",Arial,sans-serif}',
     '.sj-tit .zm button:hover{background:rgba(255,255,255,.22)}',
     '.sj-tit .zm button.pc{font-size:11px;min-width:44px;opacity:.85}',
     '.sj-tit .zm button.pc.act{opacity:1;background:rgba(255,255,255,.22)}',
-    '.sj-tit .ctrl{margin-left:8px;display:flex;gap:2px}',
+    '.sj-tit .ctrl{flex:none;margin-left:8px;display:flex;gap:2px}',
     '.sj-tit .ctrl button{background:transparent;border:0;color:#fff;width:30px;height:26px;border-radius:4px;cursor:pointer;font:400 15px/1 "Segoe UI",Arial,sans-serif}',
     '.sj-tit .ctrl button:hover{background:rgba(255,255,255,.18)}',
     '.sj-tit .ctrl button.x:hover{background:#c93b3b}',
@@ -2398,6 +3280,8 @@
     '.sj-rol{color:#6b7c85;font-size:11px;text-transform:uppercase;letter-spacing:.02em}',
     '.sj-sep{color:#b9c6cc;margin:0 5px}',
     '.sj-exp-cab .c .p{margin-top:2px;font-size:12.5px;color:#24414f}',
+    '.sj-nuevo{background:#1b6b3a;color:#fff;border-radius:8px;padding:0 6px;font-size:10.5px;font-weight:700;margin-right:6px;vertical-align:1px}',
+    '.sj-hora{color:#0a6cab;font-weight:600}',
     '.sj-leido{color:#3a4c54}',
     '.sj-leido.vieja{color:#b3261e;font-weight:600}',
     '.sj-res{font-size:11.5px;font-weight:600;white-space:nowrap}',
@@ -2616,13 +3500,28 @@
     q('[data-f="desde"]').value = CFG.desde;
     q('[data-f="hasta"]').value = CFG.hasta;
     pintarOrdenPJN();
+    pintarNovedades();
   }
 
   // El PJN no avisa cuando algo cambia: lo que se ve es la última lectura. Por eso
   // la antigüedad va a la vista, y en rojo cuando ya pasó el rato.
+  // El botón de novedades lleva la cuenta y se enciende cuando está puesto el filtro.
+  function pintarNovedades() {
+    const b = q('[data-e="novedades"]');
+    if (!b) return;
+    const n = contarNovedades();
+    b.textContent = n ? 'Novedades (' + n + ')' : 'Novedades';
+    b.classList.toggle('act', CFG.novedades);
+    b.disabled = !n && !CFG.novedades;
+    const m = q('[data-a="vistoTodo"]');
+    if (m) m.style.display = n ? '' : 'none';
+  }
+
   function pintarOrdenPJN() {
-    const b = q('[data-e="ordenPJN"]');
-    if (b) b.classList.toggle('act', CFG.orden.col === 'ult' && CFG.orden.desc !== false);
+    const cro = q('[data-e="ordenCrono"]');
+    if (cro) cro.classList.toggle('act', CFG.orden.col === 'ult' && CFG.orden.desc !== false);
+    const pjn = q('[data-e="ordenPJN"]');
+    if (pjn) pjn.classList.toggle('act', !CFG.orden.col);
   }
 
   function pintarEstado() {
@@ -2655,10 +3554,22 @@
     e.title = 'Abre Etiquetas y respaldo';
   }
 
+  // La placa de la barra azul: con qué cuenta del PJN se está trabajando.
+  function pintarPlacaCuenta() {
+    const e = q('[data-e="cuenta"]');
+    if (!e) return;
+    e.textContent = CUENTA ? (CUENTA_TXT || CUENTA) : 'sin cuenta';
+    e.classList.toggle('sin', !CUENTA);
+    e.title = CUENTA
+      ? 'Estás viendo los datos de la cuenta ' + CUENTA + ' del PJN. Las causas, etiquetas y apuntes de cada cuenta se guardan por separado: con otra cuenta no se ve nada de esta.'
+      : 'No pude identificar la cuenta del PJN: no guardo nada ni muestro lo que tenía guardado, para no mezclar los datos de dos cuentas.';
+  }
+
   function pintarBotonesLectura() {
     const a = q('[data-a="actualizar"]'), c = q('[data-a="cortarLectura"]');
     if (a) { a.disabled = leyendo; a.textContent = leyendo ? 'Leyendo...' : 'Actualizar'; }
-    if (c) c.style.display = leyendo ? '' : 'none';
+    // La tanda de horas puede durar varios minutos: el mismo botón la corta.
+    if (c) c.style.display = (leyendo || horasEnCurso) ? '' : 'none';
     pintarPastilla();
   }
 
@@ -2802,10 +3713,18 @@
   function celdaHTML(c, k, tipo) {
     if (k === 'exp') {
       const fav = tipo === 'rel' && (c.fav || !!causaEn('fav', c.exp));
-      return '<span class="sj-exp">' + esc(c.exp).replace(/ /g, '&nbsp;').replace(/\//g, '/<wbr>') + '</span>' + (fav ? '<span class="sj-fav" title="Está en tus Favoritos del PJN">★</span>' : '') +
+      return (esNovedad(c) ? '<span class="sj-nuevo" title="Cambió la fecha de la última actuación o la situación desde la última vez que la miraste. Deja de estar marcada cuando la abrís.">nuevo</span>' : '') +
+        '<span class="sj-exp">' + esc(c.exp).replace(/ /g, '&nbsp;').replace(/\//g, '/<wbr>') + '</span>' + (fav ? '<span class="sj-fav" title="Está en tus Favoritos del PJN">★</span>' : '') +
         (c.tramite ? '' : '<br><span class="sj-badge">fuera de trámite</span>');
     }
     if (k === 'partes') return partesHTML(partesDe(c));
+    if (k === 'ult') {
+      const h = HORAS[c.exp];
+      return esc(c.ult) + (h && h.f === c.ult
+        ? ' <span class="sj-hora" title="' + esc('Hora sacada de ' + h.origen + ', del último documento de la causa.' +
+          (FECHAS_CON_HORA[c.ult] ? '' : ' Todavía faltan horas de otras causas de ese mismo día, así que el orden sigue siendo el del PJN.')) + '">' + esc(h.hh) + '</span>'
+        : '');
+    }
     if (k === 'nota') {
       const n = NOTAS[c.exp];
       if (!n) return '';
@@ -3108,7 +4027,8 @@
       it('elegirUna', 'Elegir qué actuaciones bajar', b, b ? 'Durante una tanda de dejar nota no se baja nada' : '') +
       '<div class="sep"></div>' +
       it('notaUna', 'Dejar nota en esta causa', !enRel || b, soloRel) +
-      it('marcasUna', 'Etiquetas y apuntes');
+      it('marcasUna', 'Etiquetas y apuntes') +
+      ((causaPorClave(k) && esNovedad(causaPorClave(k))) ? it('vistoUna', 'Marcar como vista') : '');
   }
 
   // ------------------------------------------------------- vista expediente
@@ -3123,8 +4043,13 @@
   // De la solapa Intervinientes salen las partes de verdad, con el rol que pone el PJN.
   function partesDeIntervinientes(s) {
     if (!s || s.estado !== 'listo' || !s.filas.length) return null;
-    const iTipo = Math.max(0, s.cabs.findIndex((c) => /tipo|car[aá]cter|rol|intervin/i.test(c)));
+    // Si no se reconoce la columna del rol, se usa la primera, pero solo cuando
+    // hay otra para el nombre: dar por rol la columna 0 a ciegas daba vuelta las
+    // dos cosas y mostraba "Juan perez: ACTOR".
     const iNom = s.cabs.findIndex((c) => /nombre|denominaci/i.test(c));
+    let iTipo = s.cabs.findIndex((c) => /tipo|car[aá]cter|rol|intervin/i.test(c));
+    if (iTipo < 0) iTipo = (iNom === 0 && s.cabs.length > 1) ? 1 : 0;
+    if (iTipo === iNom) return null;
     const out = [];
     s.filas.forEach((f) => {
       const rol = limpio(f[iTipo] || '');
@@ -3135,7 +4060,30 @@
     return out.length ? out : null;
   }
 
-  const partesExp = () => partesDeIntervinientes(EXP.solapas.int) || partesDeCaratula((EXP.datos || {}).exp || '', (EXP.datos || {}).car || '');
+  // Las partes que salen de la solapa las pone el PJN; las que salen de la
+  // carátula las deduce SuPJN+. No es lo mismo y hay que decirlo: si la solapa
+  // falló, mostrar unas por otras sin aclarar es afirmar de más.
+  function partesExpHTML() {
+    const s = EXP.solapas.int;
+    const dePJN = partesDeIntervinientes(s);
+    if (dePJN) {
+      return s.completa === false
+        ? '<span title="El PJN cortó la lectura de Intervinientes: pueden faltar partes. Abrí Intervinientes y tocá Volver a leer.">' +
+          partesHTML(dePJN) + ' <span class="sj-badge">puede faltar</span></span>'
+        : partesHTML(dePJN);
+    }
+    const d = EXP.datos || {};
+    const ps = partesDeCaratula(d.exp || '', d.car || '');
+    if (!ps.length) return '';
+    const vacia = s.estado === 'listo' && !s.filas.length;
+    const dudoso = s.estado === 'error' || s.estado === 'listo' || (s.estado === 'nada' && EXP.estado === 'error');
+    return '<span title="' + esc(vacia
+      ? 'El PJN no informa intervinientes para esta causa: estas partes salen de la carátula.'
+      : dudoso
+        ? 'Sacadas de la carátula: no se pudieron leer los intervinientes del PJN. Abrí Intervinientes para ver los que manda el PJN.'
+        : 'Sacadas de la carátula mientras se leen los intervinientes del PJN.') + '">' +
+      partesHTML(ps) + (dudoso ? ' <span class="sj-badge">de la carátula</span>' : '') + '</span>';
+  }
 
   const botonPJN = (re) => [...document.querySelectorAll('a, input[type=button], input[type=submit], button')]
     .find((x) => !esNuestro(x) && re.test(limpio(x.value || x.textContent))) || null;
@@ -3149,7 +4097,7 @@
     p.innerHTML =
       '<div class="sj-sec"><div class="sj-exp-cab"><span class="n">' + esc(k || 'Expediente') + '</span>' +
       '<div class="c">' + esc(d.car) +
-      '<div class="p" data-e="partesExp">' + partesHTML(partesExp()) + '</div>' +
+      '<div class="p" data-e="partesExp">' + partesExpHTML() + '</div>' +
       '<div class="d">' + esc([d.dep, d.sit].filter(Boolean).join(' · ')) + '</div></div></div>' +
       '<div class="sj-exp-bts"><button class="sj-b" data-a="volverLista">Volver a Mis causas</button>' +
       (botonPJN(/^dejar nota$/i) ? '<button class="sj-b" data-a="notaPJN" title="Usa el botón del PJN, que pide confirmar">Dejar nota en esta causa</button>' : '') +
@@ -3183,7 +4131,12 @@
     if (s.estado === 'leyendo') return '<div class="sj-sol-txt">' + esc(s.texto || 'Pidiéndoselo al PJN...') + '</div><div class="sj-prog"><i style="width:35%"></i></div>';
     if (s.estado === 'error') return '<div class="sj-sol-txt mal">' + esc(s.texto) + '</div><div class="bts"><button class="sj-b chico" data-a="verSolapa" data-sol="' + clave + '" data-otra="1">Probar de nuevo</button></div>';
     if (s.estado !== 'listo') return '<div class="sj-sol-txt">' + esc(AYUDA_SOLAPA[clave]) + '</div>';
-    if (!s.filas.length) return '<div class="sj-sol-txt">' + esc('El PJN no tiene nada en ' + TITULO_SOLAPA[clave] + ' para esta causa.') + '</div>';
+    if (!s.filas.length) {
+      return s.completa === false
+        ? '<div class="sj-sol-txt mal">' + esc('El PJN no llegó a llenar ' + TITULO_SOLAPA[clave] + ': no se sabe si hay algo o no. Probá "Volver a leer".') + '</div>' +
+          '<div class="bts"><button class="sj-b chico" data-a="verSolapa" data-sol="' + clave + '" data-otra="1">Volver a leer</button></div>'
+        : '<div class="sj-sol-txt">' + esc('El PJN no tiene nada en ' + TITULO_SOLAPA[clave] + ' para esta causa.') + '</div>';
+    }
     const acciones = clave === 'vin';
     return '<div class="lst-sol"><table class="sj-t sj-fija"><thead><tr>' +
       s.cabs.map((c) => '<th>' + esc(c) + '</th>').join('') + (acciones ? '<th></th>' : '') + '</tr></thead><tbody>' +
@@ -3192,7 +4145,10 @@
           '<button class="sj-mas" data-a="abrirVincNueva" data-k="' + esc(f[0]) + '" title="Abrirla en una pestaña nueva">↗</button>' +
           '<button class="sj-mas" data-a="bajarVinc" data-k="' + esc(f[0]) + '" title="Bajar el expediente completo de esta causa vinculada">⇩</button></div></td>' : '') +
         '</tr>').join('') + '</tbody></table></div>' +
-      '<div class="sj-sol-txt">' + esc('Leído ' + hace(s.fecha || Date.now())) + '. ' +
+      '<div class="sj-sol-txt' + (s.completa === false ? ' mal' : '') + '">' +
+      esc(s.completa === false
+        ? 'El PJN dejó de contestar mientras se pasaban las páginas: esto es lo que se alcanzó a leer y puede faltar. Probá "Volver a leer".'
+        : 'Leído ' + hace(s.fecha || Date.now()) + '.') +
       '</div><div class="bts"><button class="sj-b chico" data-a="verSolapa" data-sol="' + clave + '" data-otra="1">Volver a leer</button></div>';
   }
 
@@ -3203,7 +4159,7 @@
     const b = q('[data-a="verSolapa"][data-sol="' + clave + '"]');
     if (b) b.innerHTML = (s.abierta ? '▾' : '▸') + ' ' + esc(TITULO_SOLAPA[clave]) + (s.estado === 'listo' ? '<span class="sj-badge">' + s.filas.length + '</span>' : '');
     const p = q('[data-e="partesExp"]');
-    if (p) p.innerHTML = partesHTML(partesExp());
+    if (p) p.innerHTML = partesExpHTML();
   }
 
   function pintarExpEstado() {
@@ -3343,11 +4299,23 @@
       '</div>';
   }
 
+  const textoPausa = () => 'Respiro entre bloques: de a ' + BLOQUE_DESCARGAS + ' causas por vez, para no saturar al PJN. Sigo en ' +
+    Math.max(1, Math.round((pausaHasta - Date.now()) / 1000)) + ' segundos.';
+
   const pausaHTML = () => (pausaHasta && Date.now() < pausaHasta
-    ? '<div class="sj-trab"><div class="txt">Respiro entre bloques: de a ' + BLOQUE_DESCARGAS + ' causas por vez, para no saturar al PJN. Sigo en ' +
-      Math.max(1, Math.round((pausaHasta - Date.now()) / 1000)) + ' segundos.</div>' +
+    ? '<div class="sj-trab" data-e="pausa"><div class="txt" data-e="pausaTxt">' + esc(textoPausa()) + '</div>' +
       '<div class="bts" style="margin-top:8px"><button class="sj-b chico" data-a="seguirAhora">Seguir ahora</button></div></div>'
     : '');
+
+  // La cuenta atrás cambia sola cada segundo: se toca solo ese texto. Redibujar
+  // toda la vista le borraba al usuario lo que estuviera escribiendo o eligiendo.
+  function pintarCuentaPausa() {
+    const caja = q('[data-e="pausa"]');
+    if (!pausaHasta || Date.now() >= pausaHasta) { if (caja) pintarDescargas(); return; }
+    if (!caja) { pintarDescargas(); return; }
+    const t = caja.querySelector('[data-e="pausaTxt"]');
+    if (t) t.textContent = textoPausa();
+  }
 
   function pintarDescargas() {
     pintarSolapas();
@@ -3389,12 +4357,28 @@
       '<h2>Etiquetas y respaldo</h2>' +
       '<p>Las etiquetas y los apuntes son datos tuyos, no del PJN: quedan en el almacén de Tampermonkey de esta PC y no se escriben en ningún expediente. Hoy hay <b>' +
       plural(et.length, 'etiqueta', 'etiquetas') + '</b> y <b>' + plural(marcadas, 'causa marcada', 'causas marcadas') + '</b>.</p>' +
+      '<h3>Carpeta de respaldo</h3>' +
+      '<p>' + (carpetaEstado === 'lista'
+        ? 'Guardando solo en <b>' + esc(carpetaTexto) + '</b>: cada cambio se escribe ahí, y al abrir SuPJN+ se lee lo que haya (sirve para trabajar en dos PC con la carpeta sincronizada).'
+        : carpetaEstado === 'pedir'
+          ? 'Hay una carpeta elegida (<b>' + esc(carpetaTexto) + '</b>), pero Chrome pide confirmar el permiso otra vez. Mientras tanto no se guarda nada ahí.'
+          : carpetaEstado === 'falta'
+            ? 'No encuentro la carpeta <b>' + esc(carpetaTexto) + '</b>: puede haberse movido, cambiado de nombre o estar sin bajar de la nube. Elegila de nuevo.'
+            : carpetaEstado === 'error'
+              ? 'Hubo un problema con la carpeta elegida' + (carpetaAviso ? ' (' + esc(carpetaAviso) + ')' : '') + '. Probá elegirla de nuevo.'
+              : 'Sin carpeta: hoy el respaldo es a mano. Si elegís una, SuPJN+ guarda e importa solo. Conviene una carpeta aparte, sincronizada (OneDrive o Drive), y no la del programa.') + '</p>' +
+      '<div class="bts">' +
+      (carpetaEstado === 'pedir' ? '<button class="sj-b prim" data-a="conectarCarpeta">Volver a permitir la carpeta</button>' : '') +
+      '<button class="sj-b' + (carpetaEstado === 'lista' ? '' : ' prim') + '" data-a="elegirCarpeta">' + (carpetaEstado === 'lista' ? 'Cambiar la carpeta' : 'Elegir carpeta') + '</button>' +
+      (carpetaEstado === 'lista' ? '<button class="sj-b" data-a="guardarCarpeta">Guardar ahora</button>' : '') +
+      '</div>' +
       '<h3>Copia de respaldo</h3>' +
-      '<p>' + (d === null ? 'Todavía no se exportó ninguna copia.' : 'Última copia: <b>' + soloFecha(RESPALDO.fecha) + '</b> (' + (d === 0 ? 'hoy' : d === 1 ? 'hace 1 día' : 'hace ' + d + ' días') + ').') +
-      ' Si se limpia el navegador o se reinstala Tampermonkey, lo que no esté en una copia se pierde. La copia se hace a mano: no hay guardado automático.</p>' +
+      '<p>' + (d === null ? 'Todavía no se guardó ninguna copia.' : 'Última copia: <b>' + soloFecha(RESPALDO.fecha) + '</b> (' + (d === 0 ? 'hoy' : d === 1 ? 'hace 1 día' : 'hace ' + d + ' días') + (RESPALDO.auto ? ', en la carpeta' : ', a mano') + ').') +
+      ' Si se limpia el navegador o se reinstala Tampermonkey, lo que no esté en una copia se pierde.' +
+      (carpetaEstado === 'lista' ? ' Con la carpeta conectada eso ya queda cubierto; el archivo suelto sirve igual para llevarlo a otra PC.' : ' Sin carpeta, la copia se hace a mano.') + '</p>' +
       '<div class="bts"><button class="sj-b prim" data-a="exportar">Exportar etiquetas, apuntes y notas</button>' +
       '<button class="sj-b" data-a="importar">Importar desde un archivo</button></div>' +
-      '<p style="color:#6b7c85;font-size:12px">La copia lleva las etiquetas, los apuntes y el registro de dejar nota de cada causa. La importación no pisa nada: suma las etiquetas que falten, si un apunte es distinto conserva los dos, y de cada causa deja el resultado de nota más nuevo. El archivo sale sin cifrar: guardalo donde guardes cualquier otro papel de trabajo.</p>' +
+      '<p style="color:#6b7c85;font-size:12px">La copia lleva las etiquetas, los apuntes y el registro de dejar nota de cada causa. La importación suma las etiquetas que falten y de cada causa deja lo más nuevo (el apunte más nuevo si las dos copias tienen fecha, y los dos textos si alguna viene de una copia vieja, sin fecha), más el resultado de nota más nuevo. El archivo sale sin cifrar: guardalo donde guardes cualquier otro papel de trabajo.</p>' +
       '<h3>Etiquetas</h3>' +
       (et.length
         ? '<table class="lista">' + et.map((e) => '<tr><td><span class="sj-chip" style="' + estiloChip(e.color) + '">' + esc(e.nom) + '</span></td>' +
@@ -3541,7 +4525,7 @@
         const r = await leerLista(tipo, (t) => { if (esVistaLista()) estadoTxt(t); });
         DATOS[tipo] = r;
         indexar(tipo);
-        if (!guardarAlmacen(LISTAS[tipo].clave, r)) errores.push(LISTAS[tipo].nombre + ' se leyó pero no se pudo guardar en esta PC');
+        if (!guardarEnCuenta(LISTAS[tipo].clave, r)) errores.push(LISTAS[tipo].nombre + (CUENTA ? ' se leyó pero no se pudo guardar en esta PC' : ' se leyó pero no se guardó: no pude identificar la cuenta del PJN'));
         pintarSolapas();
         if (VISTA === tipo) { pintarFiltros(); pintarTabla(); }
       } catch (e) {
@@ -3553,6 +4537,8 @@
     }
     leyendo = false;
     cancelarLectura = false;
+    // La primera vez no hay con qué comparar: esa lectura es la línea de partida.
+    if (!hayFoto() && (DATOS.rel || DATOS.fav)) fotoVisto();
     if (errores.length) avisar('No se pudo leer todo. ' + errores.join('. ') + '. Queda lo que ya estaba leído.', true);
     else if (cortada) avisar('Lectura cortada. Queda lo que ya estaba leído.');
     pintarSolapas();
@@ -3568,6 +4554,10 @@
   }
 
   function refrescarSiHaceFalta() {
+    // Con las listas recién leídas no se relee nada, así que la línea de partida
+    // de las novedades hay que ponerla igual: si no, el botón queda apagado hasta
+    // que las listas envejezcan.
+    if (!hayFoto() && (DATOS.rel || DATOS.fav)) fotoVisto();
     const viejas = ['rel', 'fav'].filter((t) => !DATOS[t] || Date.now() - DATOS[t].fecha > VIEJA_DESPUES_DE);
     if (viejas.length) actualizar(viejas);
   }
@@ -3580,6 +4570,7 @@
     if (bloqueoNota()) { avisar('Hay una tanda de dejar nota en curso: esperá a que termine.', true); return true; }
     if (DIAG.estado === 'corriendo') { avisar('Estoy revisando el PJN: esperá a que termine, o cortá la revisión en Acerca de.', true); return true; }
     if (accionEnCurso) { avisar('Esperá un momento: estoy abriendo otra causa.', true); return true; }
+    if (horasEnCurso) { avisar('Estoy averiguando la hora de las causas: esperá a que termine, o cortá con el botón Cortar.', true); return true; }
     return false;
   }
 
@@ -3603,6 +4594,8 @@
 
   async function abrirCausa(k, nueva) {
     if (ocupado()) return;
+    // Abrirla es haberla mirado: deja de ser novedad.
+    marcarVisto(k);
     const w = nueva ? pestanaNueva('_blank', k) : null;
     if (nueva && !w) return;
     accionEnCurso = true;
@@ -3701,18 +4694,15 @@
 
   function bajarCausas(claves) {
     if (sinBajarPorNota()) return;
-    if (claves.length > TOPE_DESCARGAS) {
-      avisar('Son demasiadas de una vez: el tope es ' + TOPE_DESCARGAS + ' causas. Elegí hasta ' + TOPE_DESCARGAS + ' y, cuando terminen, seguí con las demás.', true);
-      return;
-    }
     const n = encolarCausas(claves, 'todo');
+    if (n < 0) return;                       // no entran: ya avisó por qué
     avisar(n ? plural(n, 'causa agregada', 'causas agregadas') + ' a Descargas. Se bajan de a una en segundo plano: podés seguir trabajando en esta pestaña.' : 'Esas causas ya estaban en Descargas.');
     pintarSolapas();
   }
 
   function elegirActuaciones(k) {
     if (sinBajarPorNota()) return;
-    encolarCausas([k], 'elegir');
+    if (encolarCausas([k], 'elegir') < 0) return;
     irAVista('desc');
   }
 
@@ -3907,10 +4897,13 @@
       '<b>SuPJN+</b><span class="v">' + esc(APP.version) + '</span>' +
       '<button class="fn" data-a="menuPJN">Funciones del PJN ▾</button>' +
       '<button class="fn" data-a="recargarApp" title="Volver a cargar la página del PJN y arrancar SuPJN+ de cero">Recargar</button>' +
+      // Con qué cuenta del PJN está trabajando: los datos de cada cuenta van
+      // aparte y esto es lo que dice de quién es lo que se está viendo.
+      '<span class="cta' + (CUENTA ? '' : ' sin') + '" data-e="cuenta"></span>' +
       '<span class="zm" data-e="zoom"><button data-a="zoomMenos" title="Alejar: entra más en la ventana">−</button>' +
       '<button class="pc" data-a="zoomCien" title="Volver al tamaño normal" data-e="zoomPc">100%</button>' +
       '<button data-a="zoomMas" title="Acercar: se ve más grande">+</button></span>' +
-      '<span class="ctrl"><button data-a="min" title="Minimizar">–</button>' +
+      '<span class="ctrl"><button data-a="min" title="Minimizar">−</button>' +
       '<button data-a="max" title="Maximizar o restaurar">□</button>' +
       '<button data-a="cerrar" class="x" title="Cerrar">×</button></span></div>' +
       '<div class="sj-solapas" data-e="solapas"></div>' +
@@ -3927,9 +4920,13 @@
       '<label>Últ. act. <input type="date" data-f="desde" title="Desde"></label>' +
       '<label>a <input type="date" data-f="hasta" title="Hasta"></label>' +
       '<button class="sj-b" data-a="limpiar">Limpiar filtros</button>' +
+      '<button class="sj-b" data-a="novedades" data-e="novedades" title="Las causas que cambiaron de fecha de última actuación o de situación desde la última vez que las miraste. El PJN solo publica el día, así que dos movimientos del mismo día no se distinguen. Una causa deja de estar marcada cuando la abrís.">Novedades</button>' +
+      '<button class="sj-b" data-a="vistoTodo" title="Marcar todas las causas como vistas: se borran las marcas de novedad." style="display:none">Marcar todo como visto</button>' +
       // A la derecha, separado de los filtros, lo que cambia cómo se ve la tabla.
       '<span class="der"><button class="sj-b" data-a="menuCols">Columnas ▾</button>' +
-      '<button class="sj-b" data-a="ordenPJNLista" data-e="ordenPJN" title="Orden cronológico: por la última actuación, de la más nueva a la más vieja. Con la misma fecha, las causas quedan en el orden que manda el PJN, que desempata por la hora. Es el orden con el que arranca la app.">Orden cronológico</button></span>' +
+      '<button class="sj-b" data-a="ordenPJNlista2" data-e="ordenPJN" title="Orden PJN: las muestra en el mismo orden en que las manda el PJN cuando se le pide la lista ordenada por FECHA, que es como las ves en el sitio.">Orden PJN</button>' +
+      '<button class="sj-b" data-a="horas" title="Baja el último documento con PDF de las causas que empatan en la fecha y le lee la hora a la firma. De a cinco, con tope de quince por vez, y se puede cortar.">Averiguar la hora</button>' +
+      '<button class="sj-b" data-a="ordenPJNLista" data-e="ordenCrono" title="Orden cronológico: por la última actuación, de la más nueva a la más vieja. Con la misma fecha manda la hora, cuando se la sabe de todas las causas de ese día; si falta alguna, queda el orden que manda el PJN. Es el orden con el que arranca la app.">Orden cronológico</button></span>' +
       '</div>' +
       '<div class="sj-est"><span class="txt" data-e="estado"></span>' +
       '<button class="sj-b prim" data-a="actualizar" title="Vuelve a leer Mis causas y Favoritos del PJN">Actualizar</button>' +
@@ -4227,6 +5224,13 @@
       tRedim = setTimeout(reencuadrar, 200);
     });
 
+    // Si se cambia de pestaña o se cierra, lo que estaba por respaldarse se
+    // guarda ya: si no, se pierden los últimos segundos de lo anotado.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') respaldarYa();
+    });
+    window.addEventListener('pagehide', respaldarYa);
+
     window.addEventListener('pagehide', () => {
       PENDIENTES.forEach((w) => {
         try { w.document.body.innerHTML = '<p style="font:15px Segoe UI,Arial,sans-serif;padding:24px;color:#8c1d18">SuPJN+ no llegó a abrir la causa: la pestaña del PJN cambió de página antes. Cerrá esta pestaña y probá de nuevo.</p>'; } catch (e) { /* ya no se deja escribir */ }
@@ -4268,6 +5272,7 @@
     const exp = d.exp || '';
     const ya = COLA.find((x) => x.una && x.urls && x.urls[0] === a.url && /a bajar|bajando/.test(x.estado));
     if (ya) { avisar('Esa actuación ya se está bajando.'); return; }
+    if (!hayLugarPara(1)) return;
     const partes = [nombreArchivo(exp), (a.fecha || '').replace(/\//g, '-'), a.tipo || ''].filter(Boolean);
     nuevoTrabajo({
       exp, car: d.car || '', modo: 'seleccion', origen: 'una', acts: [a], urls: [a.url], parcial: true, una: true,
@@ -4287,6 +5292,7 @@
       const igual = COLA.find((x) => x.origen === 'exp' && x.exp === (d.exp || '') && /a bajar|bajando/.test(x.estado) &&
         x.urls && x.urls.length === urls.length && x.urls.every((u, i) => u === urls[i]));
       if (igual) { avisar('Eso ya se está bajando.'); return; }
+      if (!hayLugarPara(1)) return;
       nuevoTrabajo({ exp: d.exp || '', car: d.car || '', modo: 'seleccion', origen: 'exp', acts: EXP.acts, urls, parcial, estado: 'a bajar', texto: 'Esperando turno...' });
       pintarExpEstado();
     } else {
@@ -4434,23 +5440,71 @@
         repintarTabla(tab);
         return;
       }
-      case 'ordenPJNLista':
+      case 'ordenPJNLista': {
         // Como el PJN: por fecha de la última actuación, de la más nueva a la más
         // vieja, y con la misma fecha en el orden en que las manda el sitio.
+        const yaEstaba = CFG.orden.col === 'ult' && CFG.orden.desc !== false;
         CFG.orden = { col: 'ult', desc: true };
         guardarCfg();
         PAGINA_VISTA.rel = 1;
         PAGINA_VISTA.fav = 1;
         pintarTabla();
         pintarFiltros();
+        const cuerpo = q('.sj-cuerpo');
+        if (cuerpo) cuerpo.scrollTop = 0;
+        // El PJN no manda la hora: si hay causas que empatan en la fecha y todavía
+        // no se les averiguó, se ofrece hacerlo (baja el último documento de cada una).
+        const faltan = causasSinHora();
+        avisar((yaEstaba
+          ? 'Ya estaban en orden cronológico: por última actuación, de la más nueva a la más vieja.'
+          : 'Ordenadas por última actuación, de la más nueva a la más vieja.') +
+          (faltan.length ? ' Hay ' + plural(faltan.length, 'causa que empata', 'causas que empatan') + ' en la fecha y sin hora: tocá "Averiguar la hora" para leerla del último documento firmado.' : ''));
         return;
+      }
+      case 'ordenPJNlista2': {
+        // El orden en que las manda el PJN (la lista se lee pidiéndosela por fecha).
+        CFG.orden = { col: '', desc: false };
+        guardarCfg();
+        PAGINA_VISTA.rel = 1;
+        PAGINA_VISTA.fav = 1;
+        pintarTabla();
+        pintarFiltros();
+        const c2 = q('.sj-cuerpo');
+        if (c2) c2.scrollTop = 0;
+        avisar('En el orden en que las manda el PJN.');
+        return;
+      }
+      case 'novedades':
+        CFG.novedades = !CFG.novedades;
+        guardarCfg();
+        PAGINA_VISTA.rel = 1;
+        PAGINA_VISTA.fav = 1;
+        pintarFiltros();
+        pintarTabla();
+        pintarEstado();
+        avisar(CFG.novedades ? 'Solo las causas que se movieron desde la última vez que las miraste.' : 'Se ven todas las causas de nuevo.');
+        return;
+      case 'vistoTodo':
+        fotoVisto();
+        if (CFG.novedades) { CFG.novedades = false; guardarCfg(); }
+        pintarFiltros();
+        pintarTabla();
+        pintarEstado();
+        avisar('Listo: quedaron todas como vistas.');
+        return;
+      case 'vistoUna':
+        marcarVisto(k);
+        pintarTabla();
+        pintarFiltros();
+        return;
+      case 'horas': averiguarHoras().catch((e) => avisar('No se pudo averiguar la hora: ' + mensajeDe(e) + '.', true)); return;
       case 'zoomMas': cambiarZoom(zoomVecino(1)); return;
       case 'zoomMenos': cambiarZoom(zoomVecino(-1)); return;
       case 'zoomCien': cambiarZoom(1); return;
       case 'actualizar': avisar(''); actualizar(); return;
-      case 'cortarLectura': cancelarLectura = true; estadoTxt('Cortando...'); return;
+      case 'cortarLectura': cancelarLectura = true; cortarHoras = true; estadoTxt('Cortando...'); return;
       case 'limpiar':
-        Object.assign(CFG, { texto: '', fuero: '', sit: '', tramite: 'todas', etiqueta: '', desde: '', hasta: '' });
+        Object.assign(CFG, { texto: '', fuero: '', sit: '', tramite: 'todas', etiqueta: '', desde: '', hasta: '', novedades: false });
         PAGINA_VISTA.rel = 1;
         PAGINA_VISTA.fav = 1;
         guardarCfg();
@@ -4516,7 +5570,14 @@
         setTimeout(() => { const c = q('.sj-det-in[data-marca]'); if (c) { c.scrollIntoView({ block: 'nearest' }); const n = c.querySelector('.sj-et-nombre'); if (n) n.focus(); } }, 30);
         return;
       case 'seguirAhora': saltarPausa(); return;
-      case 'cortarCola': cortarCola = true; COLA.forEach((x) => { if (x.estado === 'en cola' || x.estado === 'a bajar') { x.estado = 'cortado'; x.texto = 'Cortado por vos.'; } }); pintarDescargas(); return;
+      case 'cortarCola':
+        cortarCola = true;
+        cortePedidoEn = Date.now();
+        // También las que están esperando que elijas actuaciones: si no, el botón
+        // decía "cortar" y esas quedaban ahí, bloqueando el aviso al salir.
+        COLA.forEach((x) => { if (x.estado === 'en cola' || x.estado === 'a bajar' || x.estado === 'eligiendo') { x.estado = 'cortado'; x.texto = 'Cortado por vos.'; } });
+        pintarDescargas();
+        return;
       case 'limpiarCola':
         for (let i = COLA.length - 1; i >= 0; i--) if (/listo|error|cortado/.test(COLA[i].estado)) COLA.splice(i, 1);
         pintarDescargas();
@@ -4548,6 +5609,23 @@
         return;
       }
       case 'exportar': exportarMarcas(); pintarCopia(); irAVista('marcas'); avisar('Copia exportada. Guardá el archivo en un lugar seguro.'); return;
+      case 'elegirCarpeta':
+        elegirCarpeta().then((r) => {
+          irAVista('marcas');
+          avisar('Listo: SuPJN+ va a guardar tus etiquetas, apuntes y notas en ' + r.nombre + ', y a leer de ahí al abrir.' +
+            (r.git ? ' Ojo: esa carpeta parece un repositorio de Git. Si la subís a GitHub, tus apuntes quedan públicos. Elegí otra.' : ''), !!r.git);
+          return conectarCarpeta(false);
+        }).then(() => { pintarCopia(); if (VISTA === 'marcas') irAVista('marcas'); })
+          .catch((e) => { if (!/abort/i.test(String(e && e.name))) avisar('No se pudo usar esa carpeta: ' + mensajeDe(e) + '.', true); });
+        return;
+      case 'conectarCarpeta':
+        conectarCarpeta(true).then(() => { irAVista('marcas'); avisar(carpetaEstado === 'lista' ? 'Carpeta conectada: guardo e importo solo.' : 'No se pudo conectar la carpeta.', carpetaEstado !== 'lista'); })
+          .catch(() => avisar('No se pudo conectar la carpeta.', true));
+        return;
+      case 'guardarCarpeta':
+        escribirEnCarpeta().then((ok) => { pintarCopia(); if (VISTA === 'marcas') irAVista('marcas'); avisar(ok ? 'Guardado en la carpeta.' : 'No se pudo guardar: ' + (carpetaAviso || 'revisá el permiso de la carpeta') + '.', !ok); })
+          .catch((e) => avisar('No se pudo guardar en la carpeta: ' + mensajeDe(e) + '.', true));
+        return;
       case 'importar': q('[data-e="archivo"]').click(); return;
       case 'borrarEt':
         if (!b.classList.contains('peligro')) { b.classList.add('peligro'); b.textContent = 'Confirmar: se quita de todas'; return; }
@@ -4587,6 +5665,119 @@
     }
   }
 
+  // ---------------------------------------------------- la hora del documento
+  //
+  // El PJN no manda la hora en ninguna pantalla, pero las resoluciones y los
+  // escritos van firmados y la firma la lleva. Para las causas que empatan en la
+  // fecha se baja el último documento y se le lee la hora de la firma.
+
+  let horasEnCurso = false;
+  let cortarHoras = false;
+
+  // Causas de la vista que empatan en fecha con otra y todavía no tienen hora.
+  // Las que ya se probaron y dieron una fecha distinta no se vuelven a bajar:
+  // su último documento con PDF no es el de la última actuación y bajarlo otra
+  // vez daría lo mismo.
+  function causasSinHora() {
+    const porFecha = {};
+    filtradas().forEach((c) => { if (numFecha(c.ult)) (porFecha[c.ult] = porFecha[c.ult] || []).push(c); });
+    const out = [];
+    Object.keys(porFecha).sort((a, b) => numFecha(b) - numFecha(a)).forEach((f) => {
+      if (porFecha[f].length < 2) return;
+      porFecha[f].forEach((c) => {
+        const h = HORAS[c.exp];
+        if (!h || (h.f !== c.ult && h.pedida !== c.ult)) out.push(c.exp);
+      });
+    });
+    return out;
+  }
+
+  async function averiguarHoras() {
+    if (horasEnCurso) return;
+    if (sinBajarPorNota() || ocupado()) return;
+    const todas = causasSinHora();
+    const claves = todas.slice(0, TOPE_DESCARGAS);
+    if (!claves.length) { avisar('No hay causas que empaten en la fecha sin hora averiguada.'); return; }
+    horasEnCurso = true;
+    cortarHoras = false;
+    pintarBotonesLectura();
+    let hechas = 0, fallas = 0, otraFecha = 0, cortado = '';
+    try {
+      for (let i = 0; i < claves.length; i++) {
+        if (cortarHoras) { cortado = 'cortado por vos'; break; }
+        if (i && i % BLOQUE_DESCARGAS === 0) {
+          estadoTxt('Respiro de ' + Math.round(PAUSA_BLOQUE / 1000) + ' segundos para no saturar al PJN...');
+          for (let e = 0; e < PAUSA_BLOQUE && !cortarHoras; e += 500) await dormir(500);
+          if (cortarHoras) { cortado = 'cortado por vos'; break; }
+        }
+        const k = claves[i];
+        const c = causaPorClave(k);
+        const ult = c ? c.ult : '';
+        estadoTxt('Averiguando la hora de ' + k + ' (' + (i + 1) + ' de ' + claves.length + ')... Se puede cortar.');
+        // Lo que no se pudo averiguar queda anotado como probado: si no, cada vez
+        // se bajarían los mismos quince documentos y nunca se llegaría a los demás.
+        const noSePudo = () => { fallas++; if (ult) guardarHora(k, { f: '', hh: '', t: Date.now(), origen: '', pedida: ult }); };
+        try {
+          const a = await ultimaActuacionConPDF(k, () => { /* sin avisos */ });
+          if (!a) { noSePudo(); continue; }
+          const r = await traerPDF(a.url);
+          if (r && r.vencida) { cortado = VENCIDA; break; }
+          const h = r && r.buf ? horaDePDF(r.buf) : null;
+          if (!h) { noSePudo(); continue; }
+          // Se guarda también para qué fecha se preguntó: si el documento es de
+          // otro día, no sirve para desempatar, pero queda anotado que ya se probó
+          // y no se lo vuelve a bajar cada vez.
+          guardarHora(k, { f: h.f, hh: h.hh, t: Date.now(), origen: h.origen, pedida: ult });
+          if (h.f === ult) hechas++; else otraFecha++;
+          if (esVistaLista()) pintarTabla();
+        } catch (e) {
+          noSePudo();
+          if (String(e && e.message) === VENCIDA) { cortado = VENCIDA; break; }
+        }
+      }
+    } finally {
+      horasEnCurso = false;
+      cortarHoras = false;
+      pintarBotonesLectura();
+    }
+    if (esVistaLista()) { pintarTabla(); pintarEstado(); }
+    const faltan = todas.length - claves.length;
+    avisar(cortado ? 'Se cortó: ' + cortado + '.'
+      : plural(hechas, 'hora averiguada', 'horas averiguadas') +
+        (otraFecha ? '. En ' + plural(otraFecha, 'causa', 'causas') + ' el último documento con PDF es de otro día que la última actuación, así que no sirve para desempatar (no se vuelve a bajar)' : '') +
+        (fallas ? '. En ' + plural(fallas, 'causa', 'causas') + ' no se pudo: la última actuación puede no tener documento firmado' : '') +
+        '.' + (faltan ? ' Quedan ' + faltan + ' para la próxima vez: van hasta ' + TOPE_DESCARGAS + ' por vez.' : '') +
+        (hechas ? ' ' + compararConElPJN() : ''), !!cortado);
+  }
+
+  // ¿El PJN ordena por la hora de la firma? Se compara, con las causas que
+  // empatan en la fecha y ya tienen hora, el orden en que las manda el PJN contra
+  // el orden de las horas. Es la única forma de saberlo: el criterio no lo publica.
+  function compararConElPJN() {
+    const porFecha = {};
+    filtradas().forEach((c) => {
+      const h = HORAS[c.exp];
+      if (!h || h.f !== c.ult || c.pos == null) return;
+      (porFecha[c.ult] = porFecha[c.ult] || []).push({ pos: c.pos, hh: h.hh });
+    });
+    let grupos = 0, coinciden = 0, pares = 0, bien = 0;
+    Object.keys(porFecha).forEach((f) => {
+      const g = porFecha[f];
+      if (g.length < 2) return;
+      grupos++;
+      g.sort((a, b) => a.pos - b.pos);
+      let ok = true;
+      for (let i = 1; i < g.length; i++) {
+        pares++;
+        if (g[i - 1].hh >= g[i].hh) bien++; else ok = false;
+      }
+      if (ok) coinciden++;
+    });
+    if (!grupos) return 'Todavía no hay dos causas del mismo día con hora para comparar el orden del PJN.';
+    if (coinciden === grupos) return 'El orden del PJN coincide con la hora de la firma en ' + plural(grupos, 'grupo de causas del mismo día', 'grupos de causas del mismo día') + ': ordena por esa hora.';
+    return 'El orden del PJN coincide con la hora de la firma en ' + bien + ' de ' + pares + ' comparaciones (' + coinciden + ' de ' + grupos + ' grupos enteros): no ordena por la hora de la firma, sino por otra cosa, probablemente la hora en que se cargó el movimiento.';
+  }
+
   // ------------------------------------------- las otras solapas del expediente
 
   async function leerSolapa(clave, auto) {
@@ -4606,6 +5797,7 @@
       const r = await leerSolapaExp(CID_PAGINA, clave, (t) => { s.texto = t; pintarSolapaExp(clave); });
       s.cabs = r.cabs;
       s.filas = r.filas;
+      s.completa = r.completa !== false;
       s.fecha = Date.now();
       s.estado = 'listo';
       s.texto = '';
@@ -4635,10 +5827,15 @@
 
   async function bajarVinculado(k) {
     if (sinBajarPorNota() || ocupado()) return;
+    if (COLA.find((t) => t.exp === k && t.modo === 'todo' && EN_JUEGO.test(t.estado))) { avisar(k + ' ya está en Descargas.'); return; }
+    if (!hayLugarPara(1)) return;
     accionEnCurso = true;
     try {
       const url = await direccionVinculado(CID_PAGINA, k, (t) => avisar(t));
       const cid = new URL(url).searchParams.get('cid');
+      // Dos clics seguidos en el mismo ⇩ encolaban la causa dos veces (se vuelve
+      // a mirar porque entre medio se le preguntó la dirección al PJN).
+      if (COLA.find((t) => t.exp === k && t.modo === 'todo' && EN_JUEGO.test(t.estado))) { avisar(k + ' ya está en Descargas.'); return; }
       nuevoTrabajo({ exp: k, car: '', modo: 'todo', cid, estado: 'en cola', texto: 'En cola' });
       avisar(k + ' se agregó a Descargas. Se baja en segundo plano.');
       pintarSolapas();
@@ -4706,6 +5903,10 @@
       sesionMirada.ts = 0;
       if (await sesionVencida()) { anotar('Sesión del PJN', false, 'venció: recargá la página, volvé a entrar si lo pide y probá de nuevo', 'venció'); return; }
       anotar('Sesión del PJN', true, 'activa');
+      // Con qué cuenta entró: es lo que separa los datos de una cuenta de los de
+      // otra, así que si esto no se lee, SuPJN+ no muestra ni guarda nada.
+      if (CUENTA) anotar('Cuenta del PJN', true, 'la leí del encabezado: ' + cuentaCorta());
+      else anotar('Cuenta del PJN', false, 'no la encontré en el encabezado: sin esto no muestro ni guardo nada, para no mezclar dos cuentas');
       if (!vivo()) return;
 
       // La lista de Relacionados y lo que SuPJN+ usa de ella.
@@ -4891,10 +6092,25 @@
 
   function arrancar() {
     if (EN_PORTAL) { lanzadorPortal(); return; }
+    revisarCuenta();
     if (!construir()) return;
+    pintarPlacaCuenta();
+    if (!CUENTA) {
+      avisar(SIN_CUENTA, true);
+      // Por si el PJN dibuja la barra de usuario con su propio JavaScript,
+      // después de que la página ya quedó lista.
+      setTimeout(() => {
+        if (!revisarCuenta() || !CUENTA) return;
+        pintarPlacaCuenta();
+        pintarTodo();
+        refrescarSiHaceFalta();
+        avisar('Ya identifiqué la cuenta del PJN: ' + (CUENTA_TXT || CUENTA) + '.');
+      }, 2500);
+    }
     if (EN_EXPEDIENTE) {
       VISTA = 'exp';
       EXP.datos = datosExpediente(document);
+      if (EXP.datos.exp) marcarVisto(EXP.datos.exp);
     } else {
       const tl = EN_LISTA ? tipoLista(document) : null;
       VISTA = tl || (CFG.vista === 'fav' ? 'fav' : 'rel');
@@ -4936,10 +6152,12 @@
 
     if (EN_EXPEDIENTE) leerExpedienteActual().then(refrescarSiHaceFalta);
     else refrescarSiHaceFalta();
+    // Si hay una carpeta de respaldo elegida, se lee lo que haya y se guarda lo de acá.
+    conectarCarpeta(false).then((r) => { if (r && r !== true) pintarTodo(); pintarCopia(); }).catch(() => { /* sin carpeta se sigue igual */ });
     // El "leídas hace..." tiene que envejecer solo, sin recargar nada.
     setInterval(() => { if (win && win.style.display !== 'none' && esVistaLista() && !leyendo) pintarEstado(); }, 60000);
     // La cuenta atrás del respiro entre bloques.
-    setInterval(() => { if (pausaHasta && VISTA === 'desc' && win && win.style.display !== 'none') pintarDescargas(); }, 1000);
+    setInterval(() => { if (pausaHasta && VISTA === 'desc' && win && win.style.display !== 'none') pintarCuentaPausa(); }, 1000);
   }
 
   // Enganche para las pruebas unitarias. Solo existe en el sitio de pruebas
@@ -4948,9 +6166,16 @@
   if (location.hostname === 'pruebas.supjn.invalid' && typeof window.__SUPJN_PRUEBAS__ === 'function') {
     window.__SUPJN_PRUEBAS__({
       limpio, norm, clave, fueroDe, numFecha, fechaPareja, ordenExp, isoACorta, plural, lasN, mensajeDe,
-      mismoExpediente, textoVisible, sinRotulo, esPDF, sinNumeroDeCausa, partesDeCaratula, notas: () => NOTAS, normalizarNotas, normalizarMarcas, validarDatos,
+      mismoExpediente, textoVisible, sinRotulo, esPDF, horaDePDF, sinNumeroDeCausa, partesDeCaratula, notas: () => NOTAS, normalizarNotas, normalizarMarcas, validarDatos,
       enterosExactos, anchosEncuadrados, repartirEncuadre, minCol, anchoDe, columnasVisibles, CFG, COLS_DEF, COLS_ACT_DEF, BLOQUE_DESCARGAS, TOPE_DESCARGAS,
-      importarMarcas, marcas: () => MARCAS, valorOrdenAct, esMiTurno, resNota, acotarZoom, zoomVecino
+      importarMarcas, marcas: () => MARCAS, valorOrdenAct, esMiTurno, resNota, acotarZoom, zoomVecino,
+      // La carpeta de respaldo: el banco le pone una carpeta de mentira para
+      // probar la escritura sin tocar el disco.
+      fijarMarca, escribirEnCarpeta, datosRespaldo,
+      // La cuenta del PJN: detección y compartimentos.
+      cuentaEnTexto, buscarCuentaEnLaPagina, cuentaCorta, cuenta: () => CUENTA, cuentaTexto: () => CUENTA_TXT, cuentaDePrueba,
+      carpetaDePrueba: (h, leida) => { ponerCarpetaDePrueba(h, leida); },
+      estadoCarpeta: () => ({ estado: carpetaEstado, aviso: carpetaAviso })
     });
     return;
   }
