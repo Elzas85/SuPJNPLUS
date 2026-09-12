@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SuPJN+ - Consulta Web del PJN ampliada
 // @namespace    ignacio.kinbaum
-// @version      0.3.0
+// @version      0.2.6
 // @description  Una sola ventana sobre la Consulta Web del PJN: Mis causas y Favoritos, en trámite y fuera de trámite, con búsqueda, filtros, orden y columnas movibles; etiquetas y anotaciones propias con respaldo manual; dejar nota en todas o en las seleccionadas; bajar expedientes en PDF eligiendo causas desde la lista o actuaciones desde el expediente; y acceso a las demás funciones del PJN.
 // @author       Ignacio Kinbaum
 // @license      GPL-3.0-or-later
@@ -11,7 +11,6 @@
 // @updateURL    https://raw.githubusercontent.com/Elzas85/SUPJNPLUS/main/supjn-plus.user.js
 // @downloadURL  https://raw.githubusercontent.com/Elzas85/SUPJNPLUS/main/supjn-plus.user.js
 // @match        https://scw.pjn.gov.ar/scw/*
-// @match        https://portalpjn.pjn.gov.ar/*
 // @run-at       document-idle
 // @noframes
 // @sandbox      JavaScript
@@ -35,8 +34,7 @@
  * QUÉ ES
  *   Una sola ventana, movible, que junta todo: Mis causas (Relacionados) y
  *   Favoritos con búsqueda, filtros, orden y columnas movibles; etiquetas y
- *   apuntes propios; partes, intervinientes, causas vinculadas y recursos de
- *   cada expediente; dejar nota en todas o en las seleccionadas; bajar
+ *   apuntes propios; dejar nota en todas o en las seleccionadas; bajar
  *   expedientes en un PDF, eligiendo causas desde la lista o actuaciones desde
  *   el expediente; y un menú con las demás funciones del PJN (escritos, DEOX,
  *   notificaciones y el resto).
@@ -131,7 +129,7 @@
 
   const APP = {
     nombre: 'SuPJN+',
-    version: 'beta 0.3.0',
+    version: 'beta 0.2.6',
     autor: 'Ignacio Kinbaum',
     anio: '2026',
     mail: 'estudiojuridicokinbaum@gmail.com',
@@ -155,13 +153,7 @@
   // suyo y no se pisan los lápices.
   const S_CORRIDA = 'supjn_corrida';      // sessionStorage: tanda de notas en curso
   const S_ENCARGO = 'supjn_encargo';      // sessionStorage: algo que hacer al cargar la página
-  // En el Portal del PJN (otro sitio) SuPJN+ no puede leer la Consulta Web: ahí
-  // solo aparece la pastilla, para entrar de una.
-  const EN_PORTAL = location.host !== 'scw.pjn.gov.ar';
   const VIEJA_DESPUES_DE = 30 * 60 * 1000;
-  const BLOQUE_DESCARGAS = 5;             // causas seguidas antes del respiro
-  const PAUSA_BLOQUE = 20 * 1000;         // cuánto dura el respiro
-  const TOPE_DESCARGAS = 15;              // máximo de causas por vez
   const DIAS_AVISO_COPIA = 15;
 
   const RUTA = {
@@ -952,159 +944,6 @@
     }
   }
 
-  // ------------------------------------- las otras solapas del expediente
-  //
-  // Intervinientes, Vinculados y Recursos vienen vacías en el HTML: el PJN las
-  // llena recién cuando se las toca, y al tocarlas recarga el expediente con
-  // otro número de consulta. Se las toca en un marco oculto, sin mover la página
-  // que se está mirando. Las solapas se reconocen por su texto, no por su id,
-  // porque los ids que arma JSF cambian.
-
-  const SOLAPAS_EXP = { int: 'Intervinientes', vin: 'Vinculados', rec: 'Recursos' };
-
-  function cabezaSolapa(doc, etiqueta) {
-    const tds = [...doc.querySelectorAll('td[id*=":header:"]')].filter((td) => norm(textoVisible(td)) === norm(etiqueta));
-    return tds.find((td) => td.offsetParent) || tds.find((td) => /:header:inactive$/.test(td.id)) || tds[0] || null;
-  }
-  const panelDeSolapa = (doc, td) => (td ? doc.getElementById(td.id.replace(/:header:(active|inactive|disabled)$/, '')) : null);
-  const panelVivo = (fr, etiqueta) => {
-    const d = fr.contentDocument;
-    return panelDeSolapa(d, cabezaSolapa(d, etiqueta));
-  };
-  const firmaPanel = (p) => (p ? filasTabla(p.querySelector('table')).map((tr) => limpio(tr.textContent).slice(0, 50)).join('|') + '#' + paginaActiva(p) : '');
-  // El PJN repite el rótulo en el encabezado ("TOMO/FOLIO :TOMO/FOLIO").
-  const cabezaLimpia = (s) => { const m = /^(.*?)\s*:\s*\1$/.exec(limpio(s)); return m ? m[1] : limpio(s); };
-
-  // Hace el clic y, si el PJN contesta enviando el formulario (que es lo que hace
-  // RichFaces al cambiar de solapa), en vez de dejar navegar al marco se manda el
-  // mismo pedido por fetch. Así se sigue la redirección del PJN, que va a http://
-  // y de otro modo el navegador la corta por contenido mixto. Si el cambio fue por
-  // ajax, no hay envío y se devuelve null.
-  async function postComoClic(fr, disparar) {
-    const d = fr.contentDocument, w = fr.contentWindow;
-    permitirUpgrade(d);
-    const form = d.getElementById('expediente') || d.forms[0];
-    if (!form) throw new Error('no encuentro el formulario del expediente');
-    let cuerpo = null;
-    const propio = Object.prototype.hasOwnProperty.call(form, 'submit');
-    const antes = form.submit;
-    form.submit = function () {
-      cuerpo = new w.URLSearchParams();
-      new w.FormData(form).forEach((v, k) => { if (typeof v === 'string') cuerpo.append(k, v); });
-    };
-    try { disparar(); } finally {
-      if (propio) form.submit = antes; else { try { delete form.submit; } catch (e) { form.submit = antes; } }
-    }
-    if (!cuerpo) return null;
-    let r;
-    try {
-      r = await w.fetch(form.action, {
-        method: 'POST', body: cuerpo, credentials: 'include',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-      });
-    } catch (e) {
-      throw new Error('el PJN no respondió (si la sesión venció, recargá la página)');
-    }
-    if (!r.ok) throw new Error('el PJN contestó con error ' + r.status);
-    try { await r.text(); } catch (e) { /* solo interesa la dirección */ }
-    return r.url;
-  }
-
-  async function abrirSolapa(fr, etiqueta) {
-    let td = cabezaSolapa(fr.contentDocument, etiqueta);
-    if (!td) throw new Error('el expediente no tiene la solapa ' + etiqueta);
-    if (/:header:inactive$/.test(td.id)) {
-      const base = td.id.replace(/:header:inactive$/, '');
-      const lleno = (dd) => {
-        const p = dd.getElementById(base) || panelDeSolapa(dd, cabezaSolapa(dd, etiqueta));
-        return !!(p && (p.querySelector('table') || limpio(p.textContent)));
-      };
-      const url = await postComoClic(fr, () => { td.click(); });
-      if (url) await esperarCarga(fr, () => { fr.src = url; }, (dd) => lleno(dd) || esExpediente(dd));
-      else if (!(await esperarA(() => lleno(fr.contentDocument), 20000))) throw new Error('el PJN no abrió ' + etiqueta);
-      td = cabezaSolapa(fr.contentDocument, etiqueta) || td;
-    }
-    const p = panelDeSolapa(fr.contentDocument, td);
-    if (!p) throw new Error('el PJN no abrió ' + etiqueta);
-    return p;
-  }
-
-  // Lee una solapa entera, recorriendo su paginador propio.
-  async function leerSolapaExp(cid, clave, avisar) {
-    const etiqueta = SOLAPAS_EXP[clave];
-    const fr = crearMarco();
-    try {
-      avisar('Abro el expediente en segundo plano...');
-      await esperarCarga(fr, () => { fr.src = RUTA.exp + '?cid=' + encodeURIComponent(cid); }, esExpediente);
-      avisar('Pido ' + etiqueta + ' al PJN...');
-      let p = await abrirSolapa(fr, etiqueta);
-      const cabs = [];
-      const filas = [];
-      const vistos = {};
-      for (let v = 0; v < 300; v++) {
-        p = panelVivo(fr, etiqueta) || p;
-        const t = p.querySelector('table');
-        if (!t) break;
-        if (!cabs.length) {
-          const cab = (t.tHead && t.tHead.rows[0]) || t.rows[0];
-          if (cab) [...cab.cells].forEach((c) => cabs.push(cabezaLimpia(textoVisible(c))));
-        }
-        filasTabla(t).forEach((tr) => {
-          const c = [...tr.cells].map((x) => textoVisible(x));
-          const k = c.join('|');
-          if (!limpio(k.replace(/\|/g, ' ')) || vistos[k]) return;
-          vistos[k] = true;
-          filas.push(c);
-        });
-        avisar('Leyendo ' + etiqueta + ': ' + plural(filas.length, 'fila', 'filas'));
-        const sig = enlaceSiguiente(p);
-        if (!sig) break;
-        const antes = firmaPanel(p);
-        sig.click();
-        if (!(await esperarA(() => firmaPanel(panelVivo(fr, etiqueta)) !== antes, 20000))) break;
-      }
-      return { cabs, filas };
-    } finally {
-      fr.remove();
-    }
-  }
-
-  // Abre una causa vinculada: se vuelve a pedir la solapa y se usa el ojo de su fila.
-  async function direccionVinculado(cid, exp, avisar) {
-    const fr = crearMarco();
-    try {
-      avisar('Busco ' + exp + ' entre los vinculados...');
-      await esperarCarga(fr, () => { fr.src = RUTA.exp + '?cid=' + encodeURIComponent(cid); }, esExpediente);
-      let p = await abrirSolapa(fr, SOLAPAS_EXP.vin);
-      for (let v = 0; v < 300; v++) {
-        p = panelVivo(fr, SOLAPAS_EXP.vin) || p;
-        const t = p.querySelector('table');
-        if (!t) break;
-        const tr = filasTabla(t).find((x) => x.cells[0] && clave(textoVisible(x.cells[0])) === clave(exp));
-        if (tr) {
-          const a = enlaceOjo(tr);
-          if (!a) throw new Error('la fila de ' + exp + ' no tiene el enlace para ver el expediente');
-          avisar('Abro ' + exp + '...');
-          const url = await postAccion(fr, a);
-          let x = null;
-          try { x = new URL(url); } catch (e) { x = null; }
-          if (!x || x.origin !== location.origin || !x.searchParams.get('cid') || !/expediente\.seam$/i.test(x.pathname)) {
-            throw new Error('el PJN no abrió ' + exp + ' (si la sesión venció, recargá la página)');
-          }
-          return x.href;
-        }
-        const sig = enlaceSiguiente(p);
-        if (!sig) break;
-        const antes = firmaPanel(p);
-        sig.click();
-        if (!(await esperarA(() => firmaPanel(panelVivo(fr, SOLAPAS_EXP.vin)) !== antes, 20000))) break;
-      }
-      throw new Error('no encuentro ' + exp + ' entre los vinculados');
-    } finally {
-      fr.remove();
-    }
-  }
-
   const nombreArchivo = (exp) => 'Expediente-' + (clave(exp).replace(/[\s/]+/g, '-') || 'PJN');
 
   // ---------------------------------------------------------------- los PDF
@@ -1210,11 +1049,6 @@
   let colaCorriendo = false;
   let cortarCola = false;
   let idTrabajo = 0;
-  // De a cinco causas y un respiro entre bloque y bloque: bajar cincuenta
-  // expedientes seguidos es maltratar al PJN y dejar la app ocupada horas.
-  let hechasSeguidas = 0;
-  let pausaHasta = 0;
-  const saltarPausa = () => { pausaHasta = 0; pintarDescargas(); };
 
   function nuevoTrabajo(datos) {
     const t = Object.assign({ id: 't' + (++idTrabajo), exp: '', car: '', modo: 'todo', estado: 'en cola', texto: 'En cola', frac: 0, acts: null, elegidas: null, filtro: { texto: '', desde: '', hasta: '' }, urls: null, parcial: false }, datos);
@@ -1249,15 +1083,6 @@
       for (;;) {
         const t = COLA.find((x) => x.estado === 'en cola' || x.estado === 'a bajar');
         if (!t) break;
-        // Respiro entre bloques, salvo que se corte o se pida seguir ahora.
-        if (hechasSeguidas >= BLOQUE_DESCARGAS) {
-          hechasSeguidas = 0;
-          pausaHasta = Date.now() + PAUSA_BLOQUE;
-          pintarDescargas();
-          while (pausaHasta && Date.now() < pausaHasta && !cortarCola) await dormir(500);
-          pausaHasta = 0;
-          pintarDescargas();
-        }
         cortarCola = false;
         try {
           if (t.estado === 'en cola') {
@@ -1293,7 +1118,6 @@
           t.archivo = (t.nombre || nombreArchivo(t.exp) + (t.parcial ? '-seleccion' : '')) + '.pdf';
           guardarArchivo(r.bytes, t.archivo);
           t.estado = 'listo';
-          hechasSeguidas++;
           textoTrabajo(t, 'Listo: ' + t.archivo + ', ' + plural(r.ok, 'documento', 'documentos') + (r.fallas ? '; ' + r.fallas + ' sin PDF real' : '') + '.', 1);
         } catch (e) {
           const msg = String(e && e.message ? e.message : e);
@@ -2080,7 +1904,7 @@
     { k: 'car', t: 'Carátula', w: 280, m: 112 },
     { k: 'partes', t: 'Partes', w: 210, m: 92 },
     { k: 'sit', t: 'Situación', w: 112, m: 70 },
-    { k: 'ult', t: 'Últ. act.', w: 94, m: 80, ayuda: 'El PJN solo muestra el día de la última actuación, nunca la hora. Con el mismo día, las causas quedan en el orden que manda el sitio, que sí desempata por hora: es lo mismo que hace el botón Orden cronológico.' },
+    { k: 'ult', t: 'Últ. act.', w: 94, m: 80 },
     { k: 'nota', t: 'Nota', w: 104, m: 78 },
     { k: 'anot', t: 'Apuntes', w: 108, m: 56 }
   ];
@@ -2136,12 +1960,6 @@
       CFG.ocultas = CFG.ocultas.filter((k) => k !== 'partes');
     }
     CFG.mig = 1;
-  }
-  // Una sola vez: el orden de la app vuelve a ser el del PJN, por última
-  // actuación y de la más nueva a la más vieja.
-  if (!(CFG.mig >= 2)) {
-    CFG.orden = { col: 'ult', desc: true };
-    CFG.mig = 2;
   }
   if (!CFG.anchos || typeof CFG.anchos !== 'object') CFG.anchos = {};
   if (!esObjeto(CFG.tam)) CFG.tam = {};
@@ -2334,10 +2152,7 @@
     '.sj-barra label{display:inline-flex;align-items:center;gap:5px;color:#5a7581}',
     '.sj-b{border:1px solid #b9cde0;background:#eaf1f8;color:' + AZUL + ';border-radius:5px;padding:0 11px;cursor:pointer;font:600 12px "Segoe UI",Arial,sans-serif;height:30px;white-space:nowrap}',
     '.sj-b:hover{background:#dbe8f5}',
-    '.sj-barra .der{margin-left:auto;display:flex;gap:6px 8px;align-items:center;height:30px}',
     '.sj-b.prim{background:' + AZUL_CLARO + ';border-color:' + AZUL_CLARO + ';color:#fff}',
-    // Un botón que está puesto no es lo mismo que el botón principal de la barra.
-    '.sj-b.act{background:#d6e6f7;border-color:' + AZUL_CLARO + ';color:' + AZUL + ';box-shadow:inset 0 0 0 1px ' + AZUL_CLARO + '}',
     '.sj-b.prim:hover{background:#3f72bb}',
     '.sj-b.peligro{background:#b3261e;border-color:#b3261e;color:#fff}',
     '.sj-b.chico{height:26px;padding:0 8px}',
@@ -2462,14 +2277,6 @@
     '.sj-trab.error .txt{color:#b3261e}',
     '.sj-trab.listo .txt{color:#1b6b3a}',
     '.sj-sec{padding:12px 16px;border-bottom:1px solid #e6ecef}',
-    '.sj-solapa-exp h4{margin:0}',
-    '.sj-desplegar{background:none;border:0;padding:0;color:' + AZUL + ';font:700 13px "Segoe UI",Arial,sans-serif;cursor:pointer;display:flex;align-items:center;gap:6px}',
-    '.sj-desplegar:hover{text-decoration:underline}',
-    '.sj-sol-txt{font-size:12.5px;color:#3a4c54;margin-top:6px}',
-    '.sj-sol-txt.mal{color:#b3261e}',
-    '.lst-sol{max-height:calc(var(--sj-h,100vh) * .4);overflow:auto;margin-top:8px}',
-    '.lst-sol table.sj-t{width:100%;table-layout:auto}',
-    '.lst-sol table.sj-t td{vertical-align:middle}',
     '.sj-exp-cab{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}',
     '.sj-exp-cab .n{font:700 17px Consolas,monospace;color:' + AZUL + '}',
     '.sj-exp-cab .c{flex:1 1 320px;color:#1d2b36;font-weight:600}',
@@ -2622,7 +2429,7 @@
   // la antigüedad va a la vista, y en rojo cuando ya pasó el rato.
   function pintarOrdenPJN() {
     const b = q('[data-e="ordenPJN"]');
-    if (b) b.classList.toggle('act', CFG.orden.col === 'ult' && CFG.orden.desc !== false);
+    if (b) b.classList.toggle('prim', !CFG.orden.col);
   }
 
   function pintarEstado() {
@@ -2834,9 +2641,7 @@
     return cols.map((k) => {
       const act = o.col === k;
       return '<th class="mov' + (act ? ' act' : '') + '" draggable="true" data-tabla="' + tabla + '" data-k="' + esc(k) +
-        '" title="' + esc('Clic para ordenar. Arrastrá el título para mover la columna y su borde derecho para cambiar el ancho.' +
-          (tabla === 'act' ? ' Un tercer clic vuelve al orden en que las trae el PJN, que es el del PDF.' : '') +
-          (defCol(tabla, k).ayuda ? ' ' + defCol(tabla, k).ayuda : '')) + '">' +
+        '" title="Clic para ordenar. Arrastrá el título para mover la columna y su borde derecho para cambiar el ancho.">' +
         '<span class="tt">' + esc(defCol(tabla, k).t) + '</span><span class="fl">' + (act ? (o.desc ? '▼' : '▲') : '▽') + '</span>' +
         '<span class="rs" data-tabla="' + tabla + '" data-rs="' + esc(k) + '"></span></th>';
     }).join('');
@@ -3113,29 +2918,7 @@
 
   // ------------------------------------------------------- vista expediente
 
-  const EXP = { estado: 'nada', texto: '', datos: null, acts: null, elegidas: new Set(), filtro: { texto: '', desde: '', hasta: '' }, cortar: false,
-    // Las otras tres solapas del PJN: se piden de a una y se guardan mientras dure la página.
-    solapas: { int: { estado: 'nada', texto: '', cabs: [], filas: [], abierta: false }, vin: { estado: 'nada', texto: '', cabs: [], filas: [], abierta: false }, rec: { estado: 'nada', texto: '', cabs: [], filas: [], abierta: false } } };
-
-  // Roles de acompañamiento: no son partes, son quienes las asisten o intervienen por oficio.
-  const ROL_ACCESORIO = /letrad|apoderad|patrocinante|perit|defensor|fiscal|ministerio|s[ií]ndic|martiller|mediador|curador|tutor|auxiliar|secretari|^juez|consultor|traductor|int[eé]rprete|oficial|asesor/i;
-
-  // De la solapa Intervinientes salen las partes de verdad, con el rol que pone el PJN.
-  function partesDeIntervinientes(s) {
-    if (!s || s.estado !== 'listo' || !s.filas.length) return null;
-    const iTipo = Math.max(0, s.cabs.findIndex((c) => /tipo|car[aá]cter|rol|intervin/i.test(c)));
-    const iNom = s.cabs.findIndex((c) => /nombre|denominaci/i.test(c));
-    const out = [];
-    s.filas.forEach((f) => {
-      const rol = limpio(f[iTipo] || '');
-      const nombre = limpio(f[iNom >= 0 ? iNom : 1] || '');
-      if (!nombre || ROL_ACCESORIO.test(rol)) return;
-      out.push({ rol: nombreRol(rol), nombre });
-    });
-    return out.length ? out : null;
-  }
-
-  const partesExp = () => partesDeIntervinientes(EXP.solapas.int) || partesDeCaratula((EXP.datos || {}).exp || '', (EXP.datos || {}).car || '');
+  const EXP = { estado: 'nada', texto: '', datos: null, acts: null, elegidas: new Set(), filtro: { texto: '', desde: '', hasta: '' }, cortar: false };
 
   const botonPJN = (re) => [...document.querySelectorAll('a, input[type=button], input[type=submit], button')]
     .find((x) => !esNuestro(x) && re.test(limpio(x.value || x.textContent))) || null;
@@ -3149,61 +2932,17 @@
     p.innerHTML =
       '<div class="sj-sec"><div class="sj-exp-cab"><span class="n">' + esc(k || 'Expediente') + '</span>' +
       '<div class="c">' + esc(d.car) +
-      '<div class="p" data-e="partesExp">' + partesHTML(partesExp()) + '</div>' +
+      (partesDe({ exp: k, car: d.car }).length ? '<div class="p">' + partesHTML(partesDe({ exp: k, car: d.car })) + '</div>' : '') +
       '<div class="d">' + esc([d.dep, d.sit].filter(Boolean).join(' · ')) + '</div></div></div>' +
       '<div class="sj-exp-bts"><button class="sj-b" data-a="volverLista">Volver a Mis causas</button>' +
       (botonPJN(/^dejar nota$/i) ? '<button class="sj-b" data-a="notaPJN" title="Usa el botón del PJN, que pide confirmar">Dejar nota en esta causa</button>' : '') +
       (botonPJN(/presentar escrito/i) ? '<button class="sj-b" data-a="escritoPJN">Presentar escrito</button>' : '') +
       '<button class="sj-b" data-a="recargar">Recargar la página</button></div></div>' +
       '<div class="sj-sec"><h4>Actuaciones con PDF</h4><div data-e="expEstado"></div><div data-e="expElegir"></div></div>' +
-      solapaExpHTML('int') + solapaExpHTML('vin') + solapaExpHTML('rec') +
       (k ? '<div class="sj-sec" data-marca="' + esc(k) + '">' + editorMarcasHTML(k) + '</div>' : '');
     pintarExpEstado();
     pintarElegir('exp');
     devolverFoco(foco);
-  }
-
-  const TITULO_SOLAPA = { int: 'Intervinientes', vin: 'Causas vinculadas', rec: 'Recursos' };
-  const AYUDA_SOLAPA = {
-    int: 'Todas las partes y quienes intervienen, tal como los lista el PJN.',
-    vin: 'Las causas vinculadas a esta. Se abren y se bajan como cualquier otra.',
-    rec: 'Los recursos de esta causa, con su tipo y su estado.'
-  };
-
-  function solapaExpHTML(clave) {
-    const s = EXP.solapas[clave];
-    return '<div class="sj-sec sj-solapa-exp" data-solapa="' + clave + '">' +
-      '<h4><button class="sj-desplegar" data-a="verSolapa" data-sol="' + clave + '">' + (s.abierta ? '▾' : '▸') + ' ' + esc(TITULO_SOLAPA[clave]) +
-      (s.estado === 'listo' ? '<span class="sj-badge">' + s.filas.length + '</span>' : '') + '</button></h4>' +
-      '<div data-e="solapa-' + clave + '">' + (s.abierta ? cuerpoSolapaHTML(clave) : '') + '</div></div>';
-  }
-
-  function cuerpoSolapaHTML(clave) {
-    const s = EXP.solapas[clave];
-    if (s.estado === 'leyendo') return '<div class="sj-sol-txt">' + esc(s.texto || 'Pidiéndoselo al PJN...') + '</div><div class="sj-prog"><i style="width:35%"></i></div>';
-    if (s.estado === 'error') return '<div class="sj-sol-txt mal">' + esc(s.texto) + '</div><div class="bts"><button class="sj-b chico" data-a="verSolapa" data-sol="' + clave + '" data-otra="1">Probar de nuevo</button></div>';
-    if (s.estado !== 'listo') return '<div class="sj-sol-txt">' + esc(AYUDA_SOLAPA[clave]) + '</div>';
-    if (!s.filas.length) return '<div class="sj-sol-txt">' + esc('El PJN no tiene nada en ' + TITULO_SOLAPA[clave] + ' para esta causa.') + '</div>';
-    const acciones = clave === 'vin';
-    return '<div class="lst-sol"><table class="sj-t sj-fija"><thead><tr>' +
-      s.cabs.map((c) => '<th>' + esc(c) + '</th>').join('') + (acciones ? '<th></th>' : '') + '</tr></thead><tbody>' +
-      s.filas.map((f) => '<tr>' + f.map((v, i) => '<td' + (i === 0 ? ' class="sj-exp"' : '') + '>' + esc(v) + '</td>').join('') +
-        (acciones ? '<td class="acc"><div class="sj-acc"><button class="sj-abrir" data-a="abrirVinc" data-k="' + esc(f[0]) + '" title="Abrir esta causa vinculada en esta pestaña">Abrir</button>' +
-          '<button class="sj-mas" data-a="abrirVincNueva" data-k="' + esc(f[0]) + '" title="Abrirla en una pestaña nueva">↗</button>' +
-          '<button class="sj-mas" data-a="bajarVinc" data-k="' + esc(f[0]) + '" title="Bajar el expediente completo de esta causa vinculada">⇩</button></div></td>' : '') +
-        '</tr>').join('') + '</tbody></table></div>' +
-      '<div class="sj-sol-txt">' + esc('Leído ' + hace(s.fecha || Date.now())) + '. ' +
-      '</div><div class="bts"><button class="sj-b chico" data-a="verSolapa" data-sol="' + clave + '" data-otra="1">Volver a leer</button></div>';
-  }
-
-  function pintarSolapaExp(clave) {
-    const cont = q('[data-e="solapa-' + clave + '"]');
-    const s = EXP.solapas[clave];
-    if (cont) cont.innerHTML = s.abierta ? cuerpoSolapaHTML(clave) : '';
-    const b = q('[data-a="verSolapa"][data-sol="' + clave + '"]');
-    if (b) b.innerHTML = (s.abierta ? '▾' : '▸') + ' ' + esc(TITULO_SOLAPA[clave]) + (s.estado === 'listo' ? '<span class="sj-badge">' + s.filas.length + '</span>' : '');
-    const p = q('[data-e="partesExp"]');
-    if (p) p.innerHTML = partesHTML(partesExp());
   }
 
   function pintarExpEstado() {
@@ -3269,6 +3008,7 @@
     const todasV = V.length > 0 && V.every((i) => ctx.elegidas.has(i));
     const ANCHO_SEL = 30, ANCHO_VER = 104;   // entran Bajar y Ver
     const enc = anchosEncuadrados('act', cols, ANCHO_SEL + ANCHO_VER, anchoUtil(q('[data-elegir="' + id + '"] .lst')));
+    const o = CFG.ordenAct || { col: '' };
     const filas = V.map((i) => {
       const a = ctx.acts[i];
       return '<tr><td class="cs"><input type="checkbox" data-ei="' + i + '"' + (ctx.elegidas.has(i) ? ' checked' : '') + '></td>' +
@@ -3286,7 +3026,7 @@
       '<button class="sj-b chico" data-ea="ninguna" title="Quitar las que se ven">Ninguna</button>' +
       '<button class="sj-b chico" data-ea="invertir" title="Invertir las que se ven">Invertir</button>' +
       '<button class="sj-b chico" data-a="menuColsAct" data-id="' + esc(id) + '" title="Elegir qué columnas se ven">Columnas ▾</button>' +
-
+      (o.col ? '<button class="sj-b chico" data-ea="ordenPJN" title="Volver al orden en que las trae el PJN, que es el del PDF">Orden del PJN</button>' : '') +
       '<span class="cnt" data-e="cnt">' + esc(cuentaElegir(ctx, V.length)) + '</span></div>' +
       '<div class="lst"><table class="sj-t" style="' + estiloTabla(enc.total) + '">' +
       grupoColumnas('act', cols, ANCHO_SEL, ANCHO_VER, enc.anchos) +
@@ -3343,12 +3083,6 @@
       '</div>';
   }
 
-  const pausaHTML = () => (pausaHasta && Date.now() < pausaHasta
-    ? '<div class="sj-trab"><div class="txt">Respiro entre bloques: de a ' + BLOQUE_DESCARGAS + ' causas por vez, para no saturar al PJN. Sigo en ' +
-      Math.max(1, Math.round((pausaHasta - Date.now()) / 1000)) + ' segundos.</div>' +
-      '<div class="bts" style="margin-top:8px"><button class="sj-b chico" data-a="seguirAhora">Seguir ahora</button></div></div>'
-    : '');
-
   function pintarDescargas() {
     pintarSolapas();
     pintarPastilla();
@@ -3360,7 +3094,6 @@
       '<p>Cada causa se abre y se lee en segundo plano, sin mover la página del PJN, y se baja en un PDF. Si Chrome pregunta si el sitio puede descargar varios archivos, aceptá. Mientras haya descargas, no cierres ni cambies esta pestaña de página.</p>' +
       '<div class="bts">' + (bajandoAlgo() ? '<button class="sj-b peligro" data-a="cortarCola">Cortar las descargas</button>' : '') +
       (hayTerminadas ? '<button class="sj-b" data-a="limpiarCola">Quitar las terminadas</button>' : '') + '</div>' +
-      pausaHTML() +
       (COLA.length ? COLA.map(trabajoHTML).join('')
         : '<p class="sj-vacio">No hay descargas. Seleccioná causas en Mis causas o Favoritos y tocá "Bajar PDF de las seleccionadas", o usá el menú ⋯ de una causa para elegir actuaciones.</p>') +
       '</div>';
@@ -3701,10 +3434,6 @@
 
   function bajarCausas(claves) {
     if (sinBajarPorNota()) return;
-    if (claves.length > TOPE_DESCARGAS) {
-      avisar('Son demasiadas de una vez: el tope es ' + TOPE_DESCARGAS + ' causas. Elegí hasta ' + TOPE_DESCARGAS + ' y, cuando terminen, seguí con las demás.', true);
-      return;
-    }
     const n = encolarCausas(claves, 'todo');
     avisar(n ? plural(n, 'causa agregada', 'causas agregadas') + ' a Descargas. Se bajan de a una en segundo plano: podés seguir trabajando en esta pestaña.' : 'Esas causas ya estaban en Descargas.');
     pintarSolapas();
@@ -3927,9 +3656,8 @@
       '<label>Últ. act. <input type="date" data-f="desde" title="Desde"></label>' +
       '<label>a <input type="date" data-f="hasta" title="Hasta"></label>' +
       '<button class="sj-b" data-a="limpiar">Limpiar filtros</button>' +
-      // A la derecha, separado de los filtros, lo que cambia cómo se ve la tabla.
-      '<span class="der"><button class="sj-b" data-a="menuCols">Columnas ▾</button>' +
-      '<button class="sj-b" data-a="ordenPJNLista" data-e="ordenPJN" title="Orden cronológico: por la última actuación, de la más nueva a la más vieja. Con la misma fecha, las causas quedan en el orden que manda el PJN, que desempata por la hora. Es el orden con el que arranca la app.">Orden cronológico</button></span>' +
+      '<button class="sj-b" data-a="menuCols">Columnas ▾</button>' +
+      '<button class="sj-b" data-a="ordenPJNLista" data-e="ordenPJN" title="Mostrarlas en el mismo orden en que las manda el PJN. Con la fecha empatada, el PJN ordena por la hora de la última actuación, que no muestra en la lista.">Orden del PJN</button>' +
       '</div>' +
       '<div class="sj-est"><span class="txt" data-e="estado"></span>' +
       '<button class="sj-b prim" data-a="actualizar" title="Vuelve a leer Mis causas y Favoritos del PJN">Actualizar</button>' +
@@ -4435,9 +4163,7 @@
         return;
       }
       case 'ordenPJNLista':
-        // Como el PJN: por fecha de la última actuación, de la más nueva a la más
-        // vieja, y con la misma fecha en el orden en que las manda el sitio.
-        CFG.orden = { col: 'ult', desc: true };
+        CFG.orden = { col: '', desc: false };
         guardarCfg();
         PAGINA_VISTA.rel = 1;
         PAGINA_VISTA.fav = 1;
@@ -4462,18 +4188,6 @@
       case 'quitarUna': selVista().delete(k); pintarTodo(); return;
       case 'notaSel': pedirNota([...selVista()]); return;
       case 'usarLista': irALista(b.dataset.lista); pintarTodo(); return;
-      case 'verSolapa': {
-        const clave = b.dataset.sol;
-        const s = EXP.solapas[clave];
-        if (!s) return;
-        if (b.dataset.otra) { s.estado = 'nada'; s.abierta = true; } else s.abierta = !s.abierta;
-        if (s.abierta && s.estado === 'nada') leerSolapa(clave);
-        else pintarSolapaExp(clave);
-        return;
-      }
-      case 'abrirVinc': abrirVinculado(k, false); return;
-      case 'abrirVincNueva': abrirVinculado(k, true); return;
-      case 'bajarVinc': bajarVinculado(k); return;
       case 'diagnostico': revisarPJN(); return;
       case 'cortarDiag': cortarDiag(); return;
       case 'copiarDiag': {
@@ -4515,7 +4229,6 @@
         pintarTabla();
         setTimeout(() => { const c = q('.sj-det-in[data-marca]'); if (c) { c.scrollIntoView({ block: 'nearest' }); const n = c.querySelector('.sj-et-nombre'); if (n) n.focus(); } }, 30);
         return;
-      case 'seguirAhora': saltarPausa(); return;
       case 'cortarCola': cortarCola = true; COLA.forEach((x) => { if (x.estado === 'en cola' || x.estado === 'a bajar') { x.estado = 'cortado'; x.texto = 'Cortado por vos.'; } }); pintarDescargas(); return;
       case 'limpiarCola':
         for (let i = COLA.length - 1; i >= 0; i--) if (/listo|error|cortado/.test(COLA[i].estado)) COLA.splice(i, 1);
@@ -4584,69 +4297,6 @@
       fijarMarca(km, { nota: '' });
       if (VISTA === 'exp') pintarExpediente(); else pintarTabla();
       pintarCopia();
-    }
-  }
-
-  // ------------------------------------------- las otras solapas del expediente
-
-  async function leerSolapa(clave, auto) {
-    const s = EXP.solapas[clave];
-    if (!s || s.estado === 'leyendo') return;
-    if (!auto) s.abierta = true;
-    if (!CID_PAGINA) {
-      s.estado = 'error';
-      s.texto = 'No encuentro el número de la consulta (cid) en la dirección de la página: recargala desde la lista.';
-      pintarSolapaExp(clave);
-      return;
-    }
-    s.estado = 'leyendo';
-    s.texto = 'Pidiéndoselo al PJN...';
-    pintarSolapaExp(clave);
-    try {
-      const r = await leerSolapaExp(CID_PAGINA, clave, (t) => { s.texto = t; pintarSolapaExp(clave); });
-      s.cabs = r.cabs;
-      s.filas = r.filas;
-      s.fecha = Date.now();
-      s.estado = 'listo';
-      s.texto = '';
-    } catch (e) {
-      s.estado = 'error';
-      s.texto = 'No se pudo leer ' + TITULO_SOLAPA[clave] + ': ' + mensajeDe(e) + '.';
-    }
-    pintarSolapaExp(clave);
-  }
-
-  async function abrirVinculado(k, nueva) {
-    if (ocupado()) return;
-    const w = nueva ? pestanaNueva('_blank', k) : null;
-    if (nueva && !w) return;
-    accionEnCurso = true;
-    try {
-      const url = await direccionVinculado(CID_PAGINA, k, (t) => avisar(t));
-      if (w) { listaPestana(w); w.location.replace(url); avisar('Abrí ' + k + ' en una pestaña nueva.'); }
-      else { avisar('Abro ' + k + '...'); location.href = url; }
-    } catch (e) {
-      cerrarPestana(w);
-      avisar('No se pudo abrir ' + k + ': ' + mensajeDe(e) + '.', true);
-    } finally {
-      accionEnCurso = false;
-    }
-  }
-
-  async function bajarVinculado(k) {
-    if (sinBajarPorNota() || ocupado()) return;
-    accionEnCurso = true;
-    try {
-      const url = await direccionVinculado(CID_PAGINA, k, (t) => avisar(t));
-      const cid = new URL(url).searchParams.get('cid');
-      nuevoTrabajo({ exp: k, car: '', modo: 'todo', cid, estado: 'en cola', texto: 'En cola' });
-      avisar(k + ' se agregó a Descargas. Se baja en segundo plano.');
-      pintarSolapas();
-      procesarCola();
-    } catch (e) {
-      avisar('No se pudo bajar ' + k + ': ' + mensajeDe(e) + '.', true);
-    } finally {
-      accionEnCurso = false;
     }
   }
 
@@ -4857,9 +4507,6 @@
       const hist = r.actuaciones.filter((x) => x.hist).length;
       EXP.texto = plural(r.actuaciones.length, 'actuación con PDF', 'actuaciones con PDF') + (hist ? ' (' + hist + ' históricas)' : '') + '. Elegí cuáles bajar o bajá todo.';
       if (!EXP.datos || !EXP.datos.exp) EXP.datos = r;
-      // Las partes tienen que estar siempre a la vista: Intervinientes se lee sola,
-      // sin abrir la sección. Vinculados y Recursos, recién cuando se los pide.
-      leerSolapa('int', true);
     } catch (e) {
       EXP.estado = 'error';
       EXP.texto = 'No se pudieron leer las actuaciones: ' + mensajeDe(e) + '.';
@@ -4870,27 +4517,7 @@
 
   // --------------------------------------------------------------- arranque
 
-  // En el Portal del PJN: solo la pastilla, que lleva a la Consulta Web. Lo demás
-  // no se puede hacer desde ahí, porque es otro sitio y el navegador no deja
-  // leer las páginas del scw desde acá.
-  function lanzadorPortal() {
-    if (document.getElementById('supjn-pastilla')) return;
-    const st = document.createElement('style');
-    st.id = 'supjn-css';
-    st.textContent = CSS;
-    (document.head || document.documentElement).appendChild(st);
-    const p = document.createElement('button');
-    p.id = 'supjn-pastilla';
-    p.type = 'button';
-    p.title = 'Abrir SuPJN+ en la Consulta Web del PJN';
-    const n = DATOS.rel ? DATOS.rel.total : null;
-    p.innerHTML = 'SuPJN+' + (n == null ? '' : '<span class="cant">' + esc(String(n)) + '</span>');
-    p.addEventListener('click', () => { location.href = 'https://scw.pjn.gov.ar' + RUTA.rel; });
-    document.body.appendChild(p);
-  }
-
   function arrancar() {
-    if (EN_PORTAL) { lanzadorPortal(); return; }
     if (!construir()) return;
     if (EN_EXPEDIENTE) {
       VISTA = 'exp';
@@ -4938,8 +4565,6 @@
     else refrescarSiHaceFalta();
     // El "leídas hace..." tiene que envejecer solo, sin recargar nada.
     setInterval(() => { if (win && win.style.display !== 'none' && esVistaLista() && !leyendo) pintarEstado(); }, 60000);
-    // La cuenta atrás del respiro entre bloques.
-    setInterval(() => { if (pausaHasta && VISTA === 'desc' && win && win.style.display !== 'none') pintarDescargas(); }, 1000);
   }
 
   // Enganche para las pruebas unitarias. Solo existe en el sitio de pruebas
@@ -4949,7 +4574,7 @@
     window.__SUPJN_PRUEBAS__({
       limpio, norm, clave, fueroDe, numFecha, fechaPareja, ordenExp, isoACorta, plural, lasN, mensajeDe,
       mismoExpediente, textoVisible, sinRotulo, esPDF, sinNumeroDeCausa, partesDeCaratula, notas: () => NOTAS, normalizarNotas, normalizarMarcas, validarDatos,
-      enterosExactos, anchosEncuadrados, repartirEncuadre, minCol, anchoDe, columnasVisibles, CFG, COLS_DEF, COLS_ACT_DEF, BLOQUE_DESCARGAS, TOPE_DESCARGAS,
+      enterosExactos, anchosEncuadrados, repartirEncuadre, minCol, anchoDe, columnasVisibles, CFG, COLS_DEF, COLS_ACT_DEF,
       importarMarcas, marcas: () => MARCAS, valorOrdenAct, esMiTurno, resNota, acotarZoom, zoomVecino
     });
     return;

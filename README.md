@@ -60,7 +60,21 @@ pastilla se pone **roja** y dice que hay un aviso.
   Descripción / detalle y Fs.): se ordenan, se mueven, se ensanchan y se
   ocultan igual que las de la lista. **Orden del PJN** vuelve al orden en que
   las trae el sitio, que es el del PDF.
-- Las descargas corren de a una en segundo plano: podés seguir trabajando.
+- Las descargas corren de a una en segundo plano: podés seguir trabajando. Van
+  **de a cinco causas**, con un respiro entre bloque y bloque para no saturar al
+  PJN, y el tope por vez es de **quince**: con más que eso, avisa y no arranca.
+
+### El expediente por dentro
+
+- **Partes siempre a la vista:** al abrir una causa, SuPJN+ lee la solapa
+  Intervinientes del PJN en segundo plano y muestra las partes con su rol
+  ("Actor: A, Demandado: B", "Imputado: C"), sin los letrados ni los demás
+  intervinientes de acompañamiento.
+- **Intervinientes, Causas vinculadas y Recursos** van como secciones de la
+  ficha: se abren cuando las pedís y se leen en ese momento, recorriendo todas
+  las páginas del PJN.
+- Desde **Causas vinculadas** se abre cada causa en esta pestaña o en una nueva,
+  y se baja su expediente completo, aunque no esté en tus listas.
 
 ### Las demás funciones del PJN
 
@@ -73,13 +87,15 @@ abrir en esta pestaña o en una nueva, **libro digital** y **presentar escrito**
 ## Cómo se usa
 
 1. Entrá a **scw.pjn.gov.ar** con tu usuario.
-2. **SuPJN+** arranca minimizado y lee tus causas y favoritos en segundo plano.
+2. En el **Portal del PJN** (portalpjn.pjn.gov.ar) aparece la pastilla apenas
+   entrás: tocala y te lleva a la Consulta Web con SuPJN+ andando.
+3. **SuPJN+** arranca minimizado y lee tus causas y favoritos en segundo plano.
    La pastilla de abajo a la derecha muestra en qué anda; tocala para abrir la
    ventana. Las listas se vuelven a leer solas si pasaron más de 30 minutos, o
    cuando tocás **Actualizar**.
-3. Si quedó una tanda de **dejar nota** a medias, ahí sí se abre sola, para que
+4. Si quedó una tanda de **dejar nota** a medias, ahí sí se abre sola, para que
    puedas seguirla o cortarla.
-4. El botón **Recargar** de la barra azul vuelve a cargar la página del PJN y
+5. El botón **Recargar** de la barra azul vuelve a cargar la página del PJN y
    arranca SuPJN+ de cero. Si hay trabajo en curso, primero pide confirmar.
 
 Si la sesión del PJN venció, la ventana lo avisa: recargá la página, volvé a
