@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SuPJN+ - Consulta Web del PJN ampliada
 // @namespace    ignacio.kinbaum
-// @version      0.5.5
+// @version      0.5.4
 // @description  Ventana única sobre la Consulta Web del PJN: Mis causas y Favoritos, en trámite y fuera de trámite, con búsqueda, filtros, ordenamiento y columnas configurables; etiquetas y anotaciones propias, con copia manual o guardado automático en una carpeta designada; dejar nota en todas las causas habilitadas o en las seleccionadas; descarga de expedientes en PDF eligiendo causas desde la lista o actuaciones desde el expediente; y acceso a las demás aplicaciones del PJN.
 // @author       Ignacio Kinbaum
 // @license      GPL-3.0-or-later
@@ -127,7 +127,7 @@
  *   configuración de la ventana es común a todas las cuentas, y el texto del
  *   buscador no se guarda, porque puede ser el nombre de un cliente.
  *   Las etiquetas, las anotaciones y las notas se copian con Exportar; y, si se
- *   designa una carpeta de respaldo (solapa Respaldo), se escriben ahí en
+ *   designa una carpeta de respaldo (Etiquetas y respaldo), se escriben ahí en
  *   cada cambio y se leen al abrir. Esa carpeta la elige el usuario una vez y
  *   conviene que esté fuera del directorio del programa, para que las
  *   anotaciones no terminen en un repositorio.
@@ -157,7 +157,7 @@
 
   const APP = {
     nombre: 'SuPJN+',
-    version: 'beta 0.5.5',
+    version: 'beta 0.5.4',
     autor: 'Ignacio Kinbaum',
     anio: '2026',
     mail: 'estudiojuridicokinbaum@gmail.com',
@@ -2694,7 +2694,7 @@
     const w = ventana();
     if (typeof w.showDirectoryPicker !== 'function') throw new Error('este navegador no deja elegir una carpeta: usá Exportar e Importar manualmente');
     const h = await w.showDirectoryPicker({ id: 'supjn-respaldo', mode: 'readwrite', startIn: 'documents' });
-    // Si la carpeta es un repositorio, las anotaciones podrían terminar publicadas.
+    // Si la carpeta es un repositorio, las anotaciones podrían terminar publicados.
     let git = false;
     try {
       if (typeof h.entries === 'function') {
@@ -3097,10 +3097,7 @@
   // manejo que la tabla de causas: se ordenan, se mueven y se ensanchan.
   const COLS_ACT_DEF = [
     { k: 'fecha', t: 'Fecha', w: 92, m: 88 },
-    // "Tipo" y no "Tipo de actuación": es el nombre que le da el propio PJN en
-    // su tabla, y el rótulo largo obligaba a una columna ancha para no quedar
-    // cortado, a costa de la descripción, que es lo que conviene leer entero.
-    { k: 'tipo', t: 'Tipo', w: 118, m: 94, ayuda: 'Tipo de actuación, tal como lo informa el PJN.' },
+    { k: 'tipo', t: 'Tipo de actuación', w: 200, m: 94 },
     { k: 'detalle', t: 'Descripción / detalle', w: 430, m: 120 },
     { k: 'fojas', t: 'Fs.', w: 74, m: 62 }
   ];
@@ -3447,12 +3444,7 @@
     '.sj-fav{color:#d39e00;margin-left:4px}',
     '.sj-badge{display:inline-block;margin-top:3px;font-size:10.5px;font-weight:600;color:#6b7c85;background:#eef2f4;border-radius:8px;padding:0 7px}',
     '.sj-elegir td.acc{text-align:right;white-space:nowrap}',
-    // Descargar es un botón y Ver un enlace, porque abre una pestaña nueva. Se
-    // los dibuja igual para que la columna no quede despareja: el enlace toma
-    // la misma caja, el mismo color y la misma alineación que el botón.
-    '.sj-elegir td.acc .sj-b{padding:1px 8px;height:26px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none;color:' + AZUL + ';vertical-align:middle}',
-    '.sj-elegir td.acc .sj-b + .sj-b{margin-left:6px}',
-    '.sj-elegir td.acc a.sj-b:hover{background:#dbe8f5;text-decoration:none}',
+    '.sj-elegir td.acc .sj-b{margin-right:6px;padding:1px 6px}',
     '.sj-rol{color:#6b7c85;font-size:11px;text-transform:uppercase;letter-spacing:.02em}',
     '.sj-sep{color:#b9c6cc;margin:0 5px}',
     '.sj-exp-cab .c .p{margin-top:2px;font-size:12.5px;color:#24414f}',
@@ -3549,10 +3541,7 @@
     '.sj-elegir table.sj-t td{padding:5px 8px;font-size:12px}',
     '.sj-elegir table.sj-t th{padding:6px 8px;font-size:11.5px}',
     '.sj-elegir table.sj-t td.cs,.sj-elegir table.sj-t th.cs{padding-left:4px;padding-right:4px;text-overflow:clip}',
-    // El tipo de actuación va en dos palabras cortas ("CEDULA ELECTRONICA"):
-    // puede pasar al renglón siguiente, pero no partirse por la mitad, que es
-    // lo que haría el overflow-wrap de la tabla.
-    '.sj-elegir table.sj-t td.t{color:' + AZUL + ';font-weight:600;font-size:11.5px;white-space:normal;overflow-wrap:break-word}',
+    '.sj-elegir table.sj-t td.t{color:' + AZUL + ';font-weight:600;font-size:11.5px;white-space:normal}',
     '.sj-elegir .pie{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 10px;border-top:1px solid #e6ecef;background:#f5f8fa}',
     '.sj-redim{position:absolute;right:0;bottom:0;width:18px;height:18px;cursor:nwse-resize;z-index:40;background:linear-gradient(135deg,transparent 50%,#9fb3c4 50%,#9fb3c4 60%,transparent 60%,transparent 70%,#9fb3c4 70%,#9fb3c4 80%,transparent 80%)}',
     '#supjn.maxi .sj-redim{display:none}',
@@ -3610,7 +3599,7 @@
     s.push(['nota', 'Dejar nota', (c && c.activa) ? progresoNota(c) : (SEL[listaActual()].size || null)]);
     const activos = COLA.filter((t) => /en cola|abriendo|leyendo|descargando|a descargar|eligiendo/.test(t.estado)).length;
     s.push(['desc', 'Descargas', COLA.length ? (activos || COLA.length) : null]);
-    s.push(['marcas', 'Respaldo', null, 'Respaldo, etiquetas y anotaciones']);
+    s.push(['marcas', 'Etiquetas', null, 'Etiquetas y respaldo']);
     s.push(['acerca', 'Acerca de', null]);
     e.innerHTML = s.map(([k, t, n, tit]) => '<button data-vista="' + k + '" class="' + (VISTA === k ? 'act' : '') + '"' +
       (tit ? ' title="' + esc(tit) + '"' : '') + '>' + esc(t) +
@@ -3730,7 +3719,7 @@
       e.className = 'sj-copia ' + (d > DIAS_AVISO_COPIA ? 'vieja' : 'ok');
       e.textContent = 'Última copia: ' + soloFecha(RESPALDO.fecha) + ' (' + (d === 0 ? 'hoy' : d === 1 ? 'hace 1 día' : 'hace ' + d + ' días') + ')';
     }
-    e.title = 'Abre la solapa Respaldo';
+    e.title = 'Abre Etiquetas y respaldo';
   }
 
   // La placa de la barra azul: con qué cuenta del PJN se está trabajando.
@@ -3873,7 +3862,7 @@
         '" data-color="' + col.id + '" style="background:' + col.hex + '" title="' + esc(col.nom) + '"></button>').join('') + '</span>' +
       '<button class="sj-b" data-a="crearEt">Crear y poner</button></div>' +
       '<h4>Anotaciones</h4>' +
-      '<textarea class="sj-nota" placeholder="Anotaciones privadas sobre esta causa. Quedan en esta PC y no se escriben en el expediente.">' + esc(m.nota) + '</textarea>' +
+      '<textarea class="sj-nota" placeholder="Anotaciones privados sobre esta causa. Quedan en esta PC y no se escriben en el expediente.">' + esc(m.nota) + '</textarea>' +
       '<div class="sj-nota-pie"><button class="sj-b prim" data-a="guardarAnot">Guardar</button>' +
       '<button class="sj-b" data-a="borrarAnot">Borrar</button><span class="sj-ok">Guardado</span></div>';
   }
@@ -4402,9 +4391,7 @@
     const n = ctx.elegidas.size;
     const cols = columnasVisibles('act');
     const todasV = V.length > 0 && V.every((i) => ctx.elegidas.has(i));
-    // La columna de acciones tiene ancho fijo: tiene que entrar el botón más
-    // largo de los dos, más la separación y el relleno de la celda.
-    const ANCHO_SEL = 30, ANCHO_VER = 136;
+    const ANCHO_SEL = 30, ANCHO_VER = 104;   // entran Descargar y Ver
     const enc = anchosEncuadrados('act', cols, ANCHO_SEL + ANCHO_VER, anchoUtil(q('[data-elegir="' + id + '"] .lst')));
     const filas = V.map((i) => {
       const a = ctx.acts[i];
@@ -4412,7 +4399,7 @@
         cols.map((k) => '<td class="' + claseAct(k) + '">' + celdaAct(a, k) + '</td>').join('') +
         '<td class="acc">' +
         '<button class="sj-b chico" data-ea="bajarUna" data-i="' + i + '" title="Descargar solo esta actuación en un PDF">Descargar</button>' +
-        (a.ver ? '<a class="sj-b chico" href="' + esc(a.ver) + '" target="_blank" rel="noopener" title="Abrir esta actuación en el visor del PJN, en una pestaña nueva">Ver</a>' : '') +
+        (a.ver ? '<a href="' + esc(a.ver) + '" target="_blank" rel="noopener" title="Abrir esta actuación en el visor del PJN, en una pestaña nueva">Ver</a>' : '') +
         '</td></tr>';
     }).join('');
     return '<div class="sj-elegir" data-elegir="' + esc(id) + '">' +
@@ -4535,7 +4522,7 @@
     const marcadas = Object.keys(MARCAS.filas).length;
     const d = RESPALDO && RESPALDO.fecha ? diasDesde(RESPALDO.fecha) : null;
     return '<div class="sj-panel-in">' +
-      '<h2>Respaldo, etiquetas y anotaciones</h2>' +
+      '<h2>Etiquetas y respaldo</h2>' +
       '<p>Las etiquetas y las anotaciones son datos propios, no del PJN: quedan en el almacén de Tampermonkey de esta PC y no se escriben en ningún expediente. Hoy hay <b>' +
       plural(et.length, 'etiqueta', 'etiquetas') + '</b> y <b>' + plural(marcadas, 'causa marcada', 'causas marcadas') + '</b>.</p>' +
       '<h3>Carpeta de respaldo</h3>' +
@@ -4547,7 +4534,7 @@
             ? 'No se encuentra la carpeta <b>' + esc(carpetaTexto) + '</b>: puede haberse movido, cambiado de nombre o estar sin descargar de la nube. Elegila de nuevo.'
             : carpetaEstado === 'error'
               ? 'Hubo un problema con la carpeta elegida' + (carpetaAviso ? ' (' + esc(carpetaAviso) + ')' : '') + '. Probá elegirla de nuevo.'
-              : 'Elegí dónde guardar el respaldo. Hasta que elijas una carpeta, tenés que hacerlo manualmente. Consejo: guardalo en la nube para compartirlo con otra PC.') + '</p>' +
+              : 'Sin carpeta: hoy el respaldo se hace manualmente. Si elegís una, SuPJN+ guarda e importa solo. Conviene una carpeta aparte, sincronizada (OneDrive o Drive), y no la del programa.') + '</p>' +
       '<div class="bts">' +
       (carpetaEstado === 'pedir' ? '<button class="sj-b prim" data-a="conectarCarpeta">Volver a permitir la carpeta</button>' : '') +
       '<button class="sj-b' + (carpetaEstado === 'lista' ? '' : ' prim') + '" data-a="elegirCarpeta">' + (carpetaEstado === 'lista' ? 'Cambiar la carpeta' : 'Elegir carpeta') + '</button>' +

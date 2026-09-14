@@ -2694,7 +2694,7 @@
     const w = ventana();
     if (typeof w.showDirectoryPicker !== 'function') throw new Error('este navegador no deja elegir una carpeta: usá Exportar e Importar manualmente');
     const h = await w.showDirectoryPicker({ id: 'supjn-respaldo', mode: 'readwrite', startIn: 'documents' });
-    // Si la carpeta es un repositorio, las anotaciones podrían terminar publicadas.
+    // Si la carpeta es un repositorio, las anotaciones podrían terminar publicados.
     let git = false;
     try {
       if (typeof h.entries === 'function') {
@@ -3873,7 +3873,7 @@
         '" data-color="' + col.id + '" style="background:' + col.hex + '" title="' + esc(col.nom) + '"></button>').join('') + '</span>' +
       '<button class="sj-b" data-a="crearEt">Crear y poner</button></div>' +
       '<h4>Anotaciones</h4>' +
-      '<textarea class="sj-nota" placeholder="Anotaciones privadas sobre esta causa. Quedan en esta PC y no se escriben en el expediente.">' + esc(m.nota) + '</textarea>' +
+      '<textarea class="sj-nota" placeholder="Anotaciones privados sobre esta causa. Quedan en esta PC y no se escriben en el expediente.">' + esc(m.nota) + '</textarea>' +
       '<div class="sj-nota-pie"><button class="sj-b prim" data-a="guardarAnot">Guardar</button>' +
       '<button class="sj-b" data-a="borrarAnot">Borrar</button><span class="sj-ok">Guardado</span></div>';
   }
@@ -4547,7 +4547,7 @@
             ? 'No se encuentra la carpeta <b>' + esc(carpetaTexto) + '</b>: puede haberse movido, cambiado de nombre o estar sin descargar de la nube. Elegila de nuevo.'
             : carpetaEstado === 'error'
               ? 'Hubo un problema con la carpeta elegida' + (carpetaAviso ? ' (' + esc(carpetaAviso) + ')' : '') + '. Probá elegirla de nuevo.'
-              : 'Elegí dónde guardar el respaldo. Hasta que elijas una carpeta, tenés que hacerlo manualmente. Consejo: guardalo en la nube para compartirlo con otra PC.') + '</p>' +
+              : 'Elegí dónde tenés el respaldo, el cual tenés que hacer manualmente. Consejo: guardalo en la nube para compartirlo con otra PC.') + '</p>' +
       '<div class="bts">' +
       (carpetaEstado === 'pedir' ? '<button class="sj-b prim" data-a="conectarCarpeta">Volver a permitir la carpeta</button>' : '') +
       '<button class="sj-b' + (carpetaEstado === 'lista' ? '' : ' prim') + '" data-a="elegirCarpeta">' + (carpetaEstado === 'lista' ? 'Cambiar la carpeta' : 'Elegir carpeta') + '</button>' +
