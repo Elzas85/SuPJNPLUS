@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         SuPJN+ - Consulta Web del PJN ampliada
 // @namespace    ignacio.kinbaum
-// @version      0.7.1
-// @description  Ventana única sobre la Consulta Web del PJN: Mis causas y Favoritos, en trámite y fuera de trámite, con búsqueda, filtros, ordenamiento y columnas configurables; etiquetas y anotaciones propias, con copia manual o guardado automático en una carpeta designada; dejar nota en todas las causas habilitadas o en las seleccionadas; descarga de expedientes en PDF eligiendo causas desde la lista o actuaciones desde el expediente; escritos presentados, notificaciones electrónicas y DEOX, generales o de una causa, con sus PDF; dejar cédula con el expediente ya cargado en el formulario del PJN; la Guía judicial navegable y enlazada a cada causa; y acceso a las demás aplicaciones del PJN.
+// @version      0.7.0
+// @description  Ventana única sobre la Consulta Web del PJN: Mis causas y Favoritos, en trámite y fuera de trámite, con búsqueda, filtros, ordenamiento y columnas configurables; etiquetas y anotaciones propias, con copia manual o guardado automático en una carpeta designada; dejar nota en todas las causas habilitadas o en las seleccionadas; descarga de expedientes en PDF eligiendo causas desde la lista o actuaciones desde el expediente; escritos presentados, notificaciones electrónicas y DEOX, generales o de una causa, con sus PDF; la Guía judicial navegable y enlazada a cada causa; y acceso a las demás aplicaciones del PJN.
 // @author       Ignacio Kinbaum
 // @license      GPL-3.0-or-later
 // @copyright    2026, Ignacio Kinbaum (estudiojuridicokinbaum@gmail.com)
@@ -44,10 +44,9 @@
  *   descarga de expedientes en un PDF, eligiendo causas desde la lista o
  *   actuaciones desde el expediente; solapas propias para los escritos
  *   presentados, las notificaciones electrónicas y los DEOX, en general o de
- *   una causa, con su PDF; dejar cédula, abriendo el formulario de
- *   Notificaciones del PJN con el expediente ya elegido; la Guía judicial,
- *   navegable y enlazada al juzgado de cada causa; y un menú con las demás
- *   aplicaciones del PJN, que se abren en una pestaña nueva.
+ *   una causa, con su PDF; la Guía judicial, navegable y enlazada al juzgado
+ *   de cada causa; y un menú con las demás aplicaciones del PJN, que se abren
+ *   en una pestaña nueva.
  *   Se inicia minimizada, como indicador en el extremo inferior derecho, y aun
  *   así lee las listas en segundo plano. Se despliega por sí sola únicamente
  *   cuando quedó una tanda de dejar nota sin terminar.
@@ -154,8 +153,7 @@
  *   para cerrar la sesión al terminar.
  *
  * EL ARCHIVO QUE SALE DEL EQUIPO
- *   La exportación, y desde la 0.7.1 también el archivo de la carpeta de
- *   respaldo, va en formato propio (.supjn), binario y cifrado con una
+ *   La exportación va en formato propio (.supjn), binario y cifrado con una
  *   contraseña del usuario: AES-GCM con clave derivada por PBKDF2, sal distinta
  *   en cada archivo. No se abre con un editor de texto ni lo leen los
  *   indexadores, y sin la contraseña no se recupera en ninguna parte. La
@@ -177,7 +175,7 @@
  *   buscador no se guarda, porque puede ser el nombre de un cliente.
  *   Las etiquetas, las anotaciones y las notas se copian con Exportar; y, si se
  *   designa una carpeta de respaldo (solapa Respaldo), se escriben ahí en
- *   cada cambio, cifradas con la misma contraseña, y se leen al abrir. Esa carpeta la elige el usuario una vez y
+ *   cada cambio y se leen al abrir. Esa carpeta la elige el usuario una vez y
  *   conviene que esté fuera del directorio del programa, para que las
  *   anotaciones no terminen en un repositorio.
  *
@@ -217,39 +215,37 @@
   };
   const TOPE_PUENTE = 3000;                 // elementos como máximo por consulta
 
-  // La credencial del SSO la obtiene y la renueva la propia aplicación del PJN;
-  // SuPJN+ solo la lee, en el momento de usarla, y nunca la saca de su sitio.
-  // Estas tres funciones no usan nada de lo que se define más abajo: corren
-  // también en las aplicaciones, donde el resto del programa no arranca.
-  function credencialSSO() {
-    try {
-      for (let i = 0; i < sessionStorage.length; i++) {
-        const k = sessionStorage.key(i);
-        if (!/^oidc\.user:/.test(k || '')) continue;
-        const u = JSON.parse(sessionStorage.getItem(k) || 'null');
-        if (u && u.access_token && (!u.expires_at || u.expires_at * 1000 > Date.now() + 15000)) return u;
-      }
-    } catch (e) { /* sin acceso al almacén */ }
-    return null;
-  }
-  async function esperarCredencialSSO(msMax) {
-    const tope = Date.now() + (msMax || 0);
-    for (;;) {
-      const u = credencialSSO();
-      if (u) return u;
-      if (Date.now() >= tope) return null;
-      await new Promise((r) => setTimeout(r, 300));
-    }
-  }
-  // De la credencial solo se usa el CUIT, para comprobar que la cuenta es la
-  // misma que la de la Consulta Web.
-  const cuitSSO = (u) => String((u && u.profile && (u.profile.cuil || u.profile.preferred_username)) || '').replace(/\D/g, '');
-
   function puenteEnMarco(app) {
     const publica = app === 'guia';
     const R = RUTAS_PUENTE[app];
-    const credencialVigente = esperarCredencialSSO;
-    const cuitDe = cuitSSO;
+    const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+
+    // La credencial la obtiene y la renueva la propia aplicación del PJN; acá
+    // solo se la lee, en el momento de cada consulta, y nunca sale del marco.
+    const credencial = () => {
+      try {
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const k = sessionStorage.key(i);
+          if (!/^oidc\.user:/.test(k || '')) continue;
+          const u = JSON.parse(sessionStorage.getItem(k) || 'null');
+          if (u && u.access_token) return u;
+        }
+      } catch (e) { /* sin acceso al almacén */ }
+      return null;
+    };
+    const vigente = (u) => !!(u && u.access_token && (!u.expires_at || u.expires_at * 1000 > Date.now() + 15000));
+    async function credencialVigente(msMax) {
+      const tope = Date.now() + (msMax || 0);
+      for (;;) {
+        const u = credencial();
+        if (vigente(u)) return u;
+        if (Date.now() >= tope) return null;
+        await esperar(300);
+      }
+    }
+    // De la credencial solo sale el CUIT, para que la ventana compruebe que es
+    // la misma cuenta que la de la Consulta Web.
+    const cuitDe = (u) => String((u && u.profile && (u.profile.cuil || u.profile.preferred_username)) || '').replace(/\D/g, '');
 
     const enviar = (m) => {
       try { window.parent.postMessage(Object.assign({ supjn: 'puente', app }, m), ORIGEN_SCW); } catch (e) { /* la ventana ya no está */ }
@@ -339,165 +335,6 @@
     else credencialVigente(30000).then((u) => { if (u) enviar({ tipo: 'listo', cuit: cuitDe(u) }); });
   }
 
-  // ----------------------------------------- dejar cédula, en Notificaciones
-  //
-  // SuPJN+ no envía cédulas: abre el formulario de Notificaciones del PJN en una
-  // pestaña nueva, le carga la jurisdicción, el número y el año, pasa al paso
-  // de selección (que solo busca) y elige el expediente o el incidente exacto.
-  // Lo demás (los destinatarios, los despachos, el texto y el envío) se hace en
-  // el formulario del PJN. Relevado el 17/09/2026: el paso 1 tiene la
-  // jurisdicción (#camara-autocomplete), el número y el año; Siguiente busca en
-  // /api/expedientes y, si el PJN no ofrece la causa (solo ofrece aquellas en
-  // las que el letrado constituyó domicilio electrónico), avisa "No hay
-  // resultados para la selección actual" y no avanza. El paso 2 lista la causa
-  // y sus incidentes como "CIV 76436/2025 : carátula".
-  //
-  // El pedido viaja en el almacén de Tampermonkey, que es el mismo en todos los
-  // sitios del programa: la dirección no sirve, porque el ingreso por el SSO la
-  // pierde. Vale cinco minutos, se usa una sola vez y solo con la misma cuenta.
-  const K_CEDULA = 'supjn.cedula.v1';
-  const VIDA_CEDULA = 5 * 60 * 1000;
-  const RUTA_CEDULA = '/nueva';
-
-  function cedulaEnNotif() {
-    if (typeof GM_getValue !== 'function' || typeof GM_setValue !== 'function') return;
-    let p = null;
-    // La Consulta Web lo guarda como texto JSON, igual que el resto del almacén.
-    try { p = GM_getValue(K_CEDULA, null); if (typeof p === 'string') p = JSON.parse(p); } catch (e) { p = null; }
-    if (!p || typeof p !== 'object') return;
-    const vigente = Date.now() - (Number(p.ts) || 0) < VIDA_CEDULA && /^[A-Z]{2,4}$/.test(String(p.sigla || '')) &&
-      Number(p.num) > 0 && Number(p.anio) > 1900 && /^\d{11}$/.test(String(p.cuenta || ''));
-    if (!vigente) return;
-    const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
-    const olvidar = () => { try { GM_setValue(K_CEDULA, null); } catch (e) { /* sin almacén */ } };
-    const corta = (c) => { const x = String(c || ''); return x ? x.slice(0, 2) + '...' + x.slice(-3) : 'sin identificar'; };
-
-    // Un cartel propio, encima del formulario (no tapa ningún botón), que se
-    // cierra con su cruz.
-    const cartel = (texto, malo) => {
-      let c = document.getElementById('supjn-cedula');
-      if (!c) {
-        c = document.createElement('div');
-        c.id = 'supjn-cedula';
-        c.setAttribute('role', 'status');
-        const main = document.querySelector('main');
-        c.style.cssText = (main ? 'position:relative;margin:8px 16px 0;' : 'position:fixed;top:72px;right:16px;z-index:2147483000;max-width:420px;box-shadow:0 8px 24px rgba(0,0,0,.25);') +
-          'padding:10px 34px 10px 14px;border-radius:8px;font:13px/1.45 "Segoe UI",Arial,sans-serif;background:#fff;color:#1d2b36;border:2px solid #14416f';
-        const x = document.createElement('button');
-        x.type = 'button';
-        x.textContent = '×';
-        x.title = 'Cerrar';
-        x.style.cssText = 'position:absolute;top:4px;right:6px;border:0;background:transparent;font:700 18px/1 "Segoe UI",Arial,sans-serif;cursor:pointer;color:#14416f';
-        x.addEventListener('click', () => c.remove());
-        const t = document.createElement('div');
-        t.className = 'txt';
-        c.appendChild(t);
-        c.appendChild(x);
-        if (main) main.insertBefore(c, main.firstChild); else document.body.appendChild(c);
-      }
-      c.style.borderColor = malo ? '#b3261e' : '#14416f';
-      c.querySelector('.txt').textContent = 'SuPJN+: ' + texto;
-    };
-
-    const esperarQue = async (f, msMax) => {
-      const tope = Date.now() + msMax;
-      for (;;) {
-        let v = null;
-        try { v = f(); } catch (e) { v = null; }
-        if (v) return v;
-        if (Date.now() >= tope) return null;
-        await esperar(200);
-      }
-    };
-
-    // React solo toma el valor si se lo escribe como lo haría el teclado.
-    const escribir = (el, v) => {
-      const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
-      d.set.call(el, v);
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      el.dispatchEvent(new Event('blur', { bubbles: true }));
-    };
-
-    const opcionCamara = () => [...document.querySelectorAll('[role="option"]')]
-      .find((o) => String(o.textContent || '').split('-')[0].trim() === p.sigla) || null;
-
-    // "CIV 076436/2025/1" y "CIV 76436/2025/1" son el mismo expediente.
-    const sinCeros = (t) => String(t || '').toUpperCase().replace(/\s+/g, ' ').trim().replace(/^([A-Z]{2,4}) 0*(\d)/, '$1 $2');
-    const buscado = sinCeros(p.exp);
-    const opcionesExp = () => [...document.querySelectorAll('[id^="form-list-autocomplete-listbox-expediente"] [role="option"]')];
-    const sinResultados = () => [...document.querySelectorAll('[role="alert"], .MuiAlert-message, .MuiSnackbarContent-message, .MuiSnackbar-root')]
-      .some((e) => /no hay resultados/i.test(e.textContent || ''));
-
-    // Siguiente, en el paso 1, solo busca la causa. Después: o aparece la lista
-    // del paso 2, o el PJN dice que no hay resultados.
-    async function elegirExpediente() {
-      const sig = document.getElementById('StepperNextBtn') ||
-        [...document.querySelectorAll('button')].find((b) => /^siguiente$/i.test(String(b.textContent || '').trim()));
-      if (!sig) return 'sin boton';
-      sig.click();
-      const r = await esperarQue(() => (opcionesExp().length ? 'lista' : sinResultados() ? 'nada' : null), 15000);
-      if (r !== 'lista') return r || 'sin respuesta';
-      const exacta = opcionesExp().find((o) => sinCeros(String(o.textContent || '').split(' : ')[0]) === buscado);
-      if (!exacta) return 'sin exacta';
-      exacta.click();
-      await esperar(300);
-      return 'elegida';
-    }
-
-    async function completar(campos) {
-      const [cam, num, anio] = campos;
-      cam.focus();
-      cam.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-      let op = await esperarQue(opcionCamara, 3000);
-      if (!op) {
-        const raiz = cam.closest('.MuiAutocomplete-root') || cam.parentElement;
-        const abrir = raiz && raiz.querySelector('.MuiAutocomplete-popupIndicator, button[aria-label]');
-        if (abrir) abrir.click();
-        op = await esperarQue(opcionCamara, 3000);
-      }
-      if (!op) return false;
-      op.click();
-      await esperar(250);
-      cam.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      cam.blur();
-      escribir(num, String(p.num));
-      escribir(anio, String(p.anio));
-      await esperar(250);
-      return String(cam.value || '').split('-')[0].trim() === p.sigla && num.value === String(p.num) && anio.value === String(p.anio);
-    }
-
-    (async () => {
-      // Hasta que la aplicación entra con el SSO no se hace nada. Si pide
-      // ingresar, la página se va y el pedido sigue esperando.
-      const u = await esperarCredencialSSO(60000);
-      if (!u) return;
-      const cuit = cuitSSO(u);
-      if (cuit !== String(p.cuenta)) {
-        olvidar();
-        cartel('no se cargó ' + p.exp + ': Notificaciones está abierto con otra cuenta (' + corta(cuit) + ') y no con la de la Consulta Web (' + corta(p.cuenta) + ').', true);
-        return;
-      }
-      if (location.pathname !== RUTA_CEDULA) { location.assign(RUTA_CEDULA); return; }
-      olvidar();
-      const campos = await esperarQue(() => {
-        const c = [document.getElementById('camara-autocomplete'), document.querySelector('input[name="numeroExpediente"]'), document.querySelector('input[name="anioExpediente"]')];
-        return c.every(Boolean) ? c : null;
-      }, 20000);
-      if (!campos) { cartel('no se encontró el formulario para cargar ' + p.exp + '. Completalo a mano.', true); return; }
-      let ok = false;
-      try { ok = await completar(campos); } catch (e) { ok = false; }
-      if (!ok) { cartel('no se pudieron cargar los datos de ' + p.exp + '. Completalo a mano.', true); return; }
-      let r = '';
-      try { r = await elegirExpediente(); } catch (e) { r = ''; }
-      const sigue = ' Seguí con Siguiente: los destinatarios, los despachos y el texto. La cédula se envía desde este formulario; SuPJN+ no envía nada.';
-      if (r === 'elegida') cartel('se eligió ' + buscado + '.' + sigue);
-      else if (r === 'sin exacta') cartel('el PJN ofrece la causa, pero no ' + buscado + ' con ese número exacto: elegí en la lista el expediente o el incidente.' + sigue);
-      else if (r === 'nada') cartel('el PJN no ofrece ' + buscado + ' para dejar cédula con esta cuenta. En Notificaciones solo aparecen las causas en las que constituiste domicilio electrónico.', true);
-      else cartel('se cargaron la jurisdicción, el número y el año de ' + buscado + '. Pulsá Siguiente y elegí el expediente o el incidente.' + sigue);
-    })();
-  }
-
   const APP_PUENTE = APPS_PUENTE[location.hostname];
   if (APP_PUENTE) {
     let deLaConsulta = false;
@@ -508,7 +345,6 @@
       deLaConsulta = window.top !== window.self && (!anc || !anc.length || anc[0] === ORIGEN_SCW);
     } catch (e) { deLaConsulta = false; }
     if (deLaConsulta && String(window.name || '').indexOf(NOMBRE_MARCO) === 0) puenteEnMarco(APP_PUENTE);
-    else if (APP_PUENTE === 'notif' && window.top === window.self) cedulaEnNotif();
     return;
   }
 
@@ -528,7 +364,7 @@
 
   const APP = {
     nombre: 'SuPJN+',
-    version: 'beta 0.7.1',
+    version: 'beta 0.7.0',
     autor: 'Ignacio Kinbaum',
     anio: '2026',
     mail: 'estudiojuridicokinbaum@gmail.com',
@@ -588,7 +424,6 @@
   // Aplicaciones del PJN, tal como las lista el Portal PJN (relevado 11/09/2026).
   const APPS_PJN = [
     { t: 'Mis eventos (Portal PJN)', u: 'https://portalpjn.pjn.gov.ar/inicio' },
-    { t: 'Nueva cédula electrónica', u: 'https://notif.pjn.gov.ar/nueva' },
     { t: 'Notificaciones electrónicas', u: 'https://notif.pjn.gov.ar/' },
     { t: 'Escritos (presentar y ver presentados)', u: 'https://escritos.pjn.gov.ar/' },
     { t: 'DEOX (oficios electrónicos)', u: 'https://deox.pjn.gov.ar/deox/' },
@@ -3045,21 +2880,9 @@
   // pisarse, y el archivo de una cuenta no se importa en la otra. El nombre
   // incluye el número de cuenta, que también figura dentro del archivo y es lo
   // que se coteja al importar.
-  //
-  // Desde la 0.7.1 el archivo de la carpeta va cifrado, con la misma contraseña
-  // y el mismo formato que la exportación (pedido del autor, 17/09/2026): la
-  // carpeta suele estar sincronizada con la nube, y ahí el archivo sale del
-  // equipo. En el uso diario no se pide nada, porque se usa la contraseña
-  // guardada en esta PC. Sin contraseña no se escribe en la carpeta, y un
-  // respaldo cifrado que esta PC no puede abrir tampoco se pisa. El JSON en
-  // claro de las versiones anteriores se lee una vez y se borra cuando ya quedó
-  // escrito el cifrado.
-  const archivoRespaldo = () => 'SuPJN+-datos-' + CUENTA + EXT_ARCHIVO;
-  const archivoRespaldoViejo = () => 'SuPJN+-datos-' + CUENTA + '.json';
-  let carpetaBloqueada = false;  // hay un respaldo cifrado que esta PC no pudo abrir
-  let viejoLeido = false;        // el JSON en claro ya se importó y se puede borrar
+  const archivoRespaldo = () => 'SuPJN+-datos-' + CUENTA + '.json';
   let CARPETA = null;            // la carpeta elegida (handle del navegador)
-  let carpetaEstado = 'nada';    // nada | lista | pedir | falta | contra | error
+  let carpetaEstado = 'nada';    // nada | lista | pedir | falta | error
   let carpetaTexto = '';
   let carpetaAviso = '';         // por qué falló la última vez, en castellano
 
@@ -3141,31 +2964,17 @@
     // Nunca se escribe antes de haber leído lo que hay en la carpeta. Si no, una
     // limpieza del navegador dejaría la copia buena pisada por una vacía.
     if (!leyoLaCarpeta) { carpetaAviso = 'todavía se está leyendo el contenido de la carpeta'; return false; }
-    if (carpetaBloqueada) { carpetaEstado = 'contra'; return false; }
-    const contra = leerContra();
-    if (!contra) {
-      carpetaEstado = 'contra';
-      carpetaAviso = 'para guardar en la carpeta hace falta la contraseña de tus copias';
-      return false;
-    }
     if (!(await permisoCarpeta(CARPETA, false))) {
       carpetaEstado = 'pedir';
       carpetaAviso = 'Chrome pide confirmar otra vez el permiso de la carpeta.';
       return false;
     }
-    let datos;
-    try {
-      datos = await protegerTexto(datosRespaldo(), contra);
-    } catch (e) {
-      carpetaEstado = 'error';
-      carpetaAviso = mensajeDe(e);
-      return false;
-    }
+    const texto = datosRespaldo();
     let w = null;
     try {
       const fh = await CARPETA.getFileHandle(archivoRespaldo(), { create: true });
       w = await fh.createWritable();
-      await w.write(datos);
+      await w.write(texto);
       await w.close();
       w = null;
     } catch (e) {
@@ -3189,14 +2998,6 @@
     guardarEnCuenta(K_RESPALDO, RESPALDO);
     carpetaEstado = 'lista';
     carpetaAviso = '';
-    // Con el cifrado ya escrito, la copia en claro de las versiones anteriores
-    // se borra, pero solo si se la leyó y era de esta cuenta: si no, quedaría
-    // algo sin traer. Si no se puede borrar, se reintenta en la próxima escritura.
-    if (viejoLeido && typeof CARPETA.removeEntry === 'function') {
-      try { await CARPETA.removeEntry(archivoRespaldoViejo()); viejoLeido = false; } catch (e) {
-        if (/NotFound/i.test(String((e && e.name) || ''))) viejoLeido = false;
-      }
-    }
     return true;
   }
 
@@ -3221,63 +3022,27 @@
       .catch(() => { respaldoPendiente = true; carpetaEstado = 'error'; carpetaAviso = 'No se pudo guardar en la carpeta.'; pintarCopia(); });
   }
 
-  // Solo se importa lo que dice ser de esta cuenta. Un archivo sin cuenta
-  // adentro es de una versión anterior: se trae manualmente con Importar.
-  function importarTextoCarpeta(texto) {
-    let d = null;
-    try { d = JSON.parse(texto); } catch (e) { d = null; }
-    if (!d || d.cuenta !== CUENTA) {
-      if (d) carpetaAviso = 'el archivo de la carpeta no dice ser de esta cuenta, así que no se importó automáticamente';
-      return null;
-    }
-    const r = importarMarcas(texto);
-    return typeof r === 'string' ? null : r;
-  }
-
-  const bytesDeCarpeta = async (nombre) => {
-    try {
-      const fh = await CARPETA.getFileHandle(nombre);
-      return new Uint8Array(await (await fh.getFile()).arrayBuffer());
-    } catch (e) { return null; }   // no hay archivo
-  };
-
   async function importarDeCarpeta() {
     if (!CARPETA || !CUENTA) return null;
     if (!(await permisoCarpeta(CARPETA, false))) return null;
-    carpetaBloqueada = false;
-    viejoLeido = false;
-    // Primero el respaldo cifrado.
-    const cifrado = await bytesDeCarpeta(archivoRespaldo());
-    if (cifrado) {
-      let texto;
-      try {
-        texto = await desprotegerTexto(cifrado, leerContra());
-      } catch (e) {
-        // Sin poder leerlo tampoco se escribe: se pisaría el respaldo bueno.
-        carpetaBloqueada = true;
-        carpetaAviso = hayContra()
-          ? 'la contraseña guardada en esta PC no abre el respaldo de la carpeta'
-          : 'el respaldo de la carpeta tiene contraseña y en esta PC todavía no está puesta';
+    try {
+      const fh = await CARPETA.getFileHandle(archivoRespaldo());
+      const f = await fh.getFile();
+      // La carpeta de sincronización se escribe y se lee en claro: es una
+      // carpeta del usuario en su propio equipo, y su archivo no sale de ahí.
+      // Lo que va con contraseña es la exportación, que sí se lleva.
+      const texto = await f.text();
+      // Solo se importa solo lo que dice ser de esta cuenta. Un archivo sin
+      // cuenta adentro es de una versión anterior: se trae manualmente con Importar.
+      let d = null;
+      try { d = JSON.parse(texto); } catch (e2) { d = null; }
+      if (!d || d.cuenta !== CUENTA) {
+        if (d) carpetaAviso = 'el archivo de la carpeta no dice ser de esta cuenta, así que no se importó automáticamente';
         return null;
       }
-      return importarTextoCarpeta(texto);
-    }
-    // Si no hay, el JSON en claro de las versiones anteriores.
-    const viejo = await bytesDeCarpeta(archivoRespaldoViejo());
-    if (!viejo) return null;
-    const r = importarTextoCarpeta(new TextDecoder().decode(viejo));
-    if (r) viejoLeido = true;
-    return r;
-  }
-
-  // Reemplazar el respaldo de la carpeta que esta PC no puede abrir (por
-  // ejemplo, después de cambiar la contraseña) con los datos de esta PC. Lo
-  // que estuviera solo en ese archivo se pierde: por eso se pide confirmar.
-  async function pisarCarpeta() {
-    if (!CARPETA || !CUENTA || !hayContra()) return false;
-    carpetaBloqueada = false;
-    leyoLaCarpeta = true;
-    return escribirEnCarpeta();
+      const r = importarMarcas(texto);
+      return typeof r === 'string' ? null : r;
+    } catch (e) { return null; }   // todavía no hay archivo
   }
 
   // Elegir la carpeta: la pide el navegador y tiene que salir de un clic.
@@ -3316,7 +3081,6 @@
       carpetaEstado = 'lista';
       carpetaAviso = '';
       const r = await importarDeCarpeta();
-      if (carpetaBloqueada) { carpetaEstado = 'contra'; return false; }
       leyoLaCarpeta = true;
       await escribirEnCarpeta();
       return r || true;
@@ -3332,8 +3096,6 @@
   function ponerCarpetaDePrueba(h, leida) {
     CARPETA = h;
     leyoLaCarpeta = !!leida;
-    carpetaBloqueada = false;
-    viejoLeido = false;
     carpetaEstado = h ? 'lista' : 'nada';
     carpetaAviso = '';
     colaRespaldo = Promise.resolve(false);
@@ -4357,10 +4119,7 @@
     const e = q('[data-e="copia"]');
     if (!e) return;
     const hayMarcas = Object.keys(MARCAS.filas).length > 0;
-    if (CARPETA && carpetaEstado === 'contra') {
-      e.className = 'sj-copia vieja';
-      e.textContent = 'La carpeta de respaldo espera la contraseña';
-    } else if (!RESPALDO || !RESPALDO.fecha) {
+    if (!RESPALDO || !RESPALDO.fecha) {
       e.className = 'sj-copia ' + (hayMarcas ? 'nunca' : 'ok');
       e.textContent = hayMarcas ? 'Sin copia de etiquetas y anotaciones' : 'Todavía no hay etiquetas ni anotaciones';
     } else {
@@ -4868,7 +4627,6 @@
       it('notaUna', 'Dejar nota en esta causa', !enRel || b, soloRel) +
       it('marcasUna', 'Etiquetas y anotaciones') +
       '<div class="sep"></div>' +
-      it('cedulaUna', 'Dejar cédula (Notificaciones, pestaña nueva)') +
       it('verEscr', 'Escritos presentados en esta causa') +
       it('verNotif', 'Notificaciones de esta causa') +
       it('verDeox', 'DEOX de esta causa') +
@@ -4948,8 +4706,7 @@
       (botonPJN(/^dejar nota$/i) ? '<button class="sj-b" data-a="notaPJN" title="Usa el botón del PJN, que pide confirmar">Dejar nota en esta causa</button>' : '') +
       (botonPJN(/presentar escrito/i) ? '<button class="sj-b" data-a="escritoPJN">Presentar escrito</button>' : '') +
       '<button class="sj-b" data-a="recargar">Recargar la página</button></div>' +
-      (k ? '<div class="sj-exp-bts"><button class="sj-b prim" data-a="cedulaUna" data-k="' + esc(k) + '" title="Abre Notificaciones en una pestaña nueva, con este expediente cargado">Dejar cédula</button>' +
-        '<button class="sj-b" data-a="verEscr" data-k="' + esc(k) + '" title="Los escritos presentados en esta causa, de cualquier fecha">Escritos</button>' +
+      (k ? '<div class="sj-exp-bts"><button class="sj-b" data-a="verEscr" data-k="' + esc(k) + '" title="Los escritos presentados en esta causa, de cualquier fecha">Escritos</button>' +
         '<button class="sj-b" data-a="verNotif" data-k="' + esc(k) + '" title="Las notificaciones electrónicas de esta causa, de cualquier fecha">Notificaciones</button>' +
         '<button class="sj-b" data-a="verDeox" data-k="' + esc(k) + '" title="Los oficios electrónicos de esta causa, de cualquier fecha">DEOX</button>' +
         (d.dep ? '<button class="sj-b" data-a="verGuia" data-k="' + esc(k) + '" title="Domicilio, teléfono e integrantes de la dependencia, según la Guía judicial">Juzgado en la Guía</button>' : '') +
@@ -4995,8 +4752,7 @@
       s.filas.map((f) => '<tr>' + f.map((v, i) => '<td' + (i === 0 ? ' class="sj-exp"' : '') + '>' + esc(v) + '</td>').join('') +
         (acciones ? '<td class="acc"><div class="sj-acc"><button class="sj-abrir" data-a="abrirVinc" data-k="' + esc(f[0]) + '" title="Abrir esta causa vinculada en esta pestaña">Abrir</button>' +
           '<button class="sj-mas" data-a="abrirVincNueva" data-k="' + esc(f[0]) + '" title="Abrirla en una pestaña nueva">↗</button>' +
-          '<button class="sj-mas" data-a="bajarVinc" data-k="' + esc(f[0]) + '" title="Descargar el expediente completo de esta causa vinculada">⇩</button>' +
-          '<button class="sj-mas" data-a="cedulaUna" data-k="' + esc(f[0]) + '" title="Dejar cédula en esta causa vinculada (Notificaciones, pestaña nueva)">✉</button></div></td>' : '') +
+          '<button class="sj-mas" data-a="bajarVinc" data-k="' + esc(f[0]) + '" title="Descargar el expediente completo de esta causa vinculada">⇩</button></div></td>' : '') +
         '</tr>').join('') + '</tbody></table></div>' +
       '<div class="sj-sol-txt' + (s.completa === false ? ' mal' : '') + '">' +
       esc(s.completa === false
@@ -5210,14 +4966,14 @@
   function contraHTML() {
     const puesta = hayContra();
     return '<h3>Contraseña de tus copias</h3>' +
-      '<p>El archivo que exportás, y el que se guarda en la carpeta de respaldo, salen en formato propio de SuPJN+, no como texto: no se abren con el Bloc de notas ' +
-      'ni los leen los buscadores de escritorio o de la nube, y hace falta la contraseña para abrirlos. ' +
+      '<p>El archivo que exportás sale en formato propio de SuPJN+, no como texto: no se abre con el Bloc de notas ' +
+      'ni lo leen los buscadores de escritorio o de la nube, y hace falta la contraseña para abrirlo. ' +
       'Es la protección del archivo cuando sale de esta PC, que es donde queda fuera de tu control.</p>' +
       (puesta
-        ? '<p><b>Contraseña puesta.</b> En esta PC no se te pide: ni para exportar, ni para importar, ni para la carpeta. ' +
-          'En otra máquina hay que ponerla una vez, para importar el archivo o para leer la carpeta.</p>' +
+        ? '<p><b>Contraseña puesta.</b> En esta PC no se te pide: ni para exportar ni para importar. ' +
+          'Te la va a pedir SuPJN+ en otra máquina, cuando importes ahí el archivo.</p>' +
           '<div class="bts"><button class="sj-b" data-a="verContra">Ver o cambiar la contraseña</button></div>'
-        : '<p style="color:#8a5a00">Todavía no pusiste contraseña, así que no se puede exportar ni guardar en la carpeta. ' +
+        : '<p style="color:#8a5a00">Todavía no pusiste contraseña, así que no se puede exportar. ' +
           'Poné una y anotala donde guardes tus claves: sin ella, el archivo no se abre en ninguna parte, ' +
           'tampoco acá si perdés esta PC.</p>') +
       (puesta && mostrarContra
@@ -5239,14 +4995,7 @@
       plural(et.length, 'etiqueta', 'etiquetas') + '</b> y <b>' + plural(marcadas, 'causa marcada', 'causas marcadas') + '</b>.</p>' +
       '<h3>Carpeta de respaldo</h3>' +
       '<p>' + (carpetaEstado === 'lista'
-        ? 'Guardando solo en <b>' + esc(carpetaTexto) + '</b>: cada cambio se escribe ahí, cifrado con la contraseña de tus copias, y al abrir SuPJN+ se lee lo que haya (sirve para trabajar en dos PC con la carpeta sincronizada; en la otra PC tiene que estar puesta la misma contraseña).'
-        : carpetaEstado === 'contra'
-          ? 'Hay una carpeta elegida (<b>' + esc(carpetaTexto) + '</b>), pero ' + (carpetaBloqueada
-            ? (hayContra()
-              ? 'la contraseña de esta PC no abre el respaldo que hay ahí. Poné la misma contraseña que usaste en la otra PC, con "Ver o cambiar la contraseña". Si cambiaste la contraseña a propósito, podés reemplazar ese respaldo con los datos de esta PC.'
-              : 'el respaldo que hay ahí tiene contraseña. Poné la misma que usaste en la otra PC, más abajo, y se lee enseguida.')
-            : 'para guardar ahí hace falta la contraseña de tus copias. Ponela más abajo y se guarda enseguida.') +
-            ' Mientras tanto no se escribe nada en la carpeta.'
+        ? 'Guardando solo en <b>' + esc(carpetaTexto) + '</b>: cada cambio se escribe ahí, y al abrir SuPJN+ se lee lo que haya (sirve para trabajar en dos PC con la carpeta sincronizada).'
         : carpetaEstado === 'pedir'
           ? 'Hay una carpeta elegida (<b>' + esc(carpetaTexto) + '</b>), pero Chrome pide confirmar el permiso otra vez. Mientras tanto no se guarda nada ahí.'
           : carpetaEstado === 'falta'
@@ -5256,7 +5005,6 @@
               : 'Elegí dónde tenés el respaldo, el cual tenés que hacer manualmente. Consejo: guardalo en la nube para compartirlo con otra PC.') + '</p>' +
       '<div class="bts">' +
       (carpetaEstado === 'pedir' ? '<button class="sj-b prim" data-a="conectarCarpeta">Volver a permitir la carpeta</button>' : '') +
-      (carpetaEstado === 'contra' && carpetaBloqueada && hayContra() ? '<button class="sj-b" data-a="pisarCarpeta" title="Lo que esté solo en el respaldo de la carpeta se pierde">Reemplazar el respaldo de la carpeta con los datos de esta PC</button>' : '') +
       '<button class="sj-b' + (carpetaEstado === 'lista' ? '' : ' prim') + '" data-a="elegirCarpeta">' + (carpetaEstado === 'lista' ? 'Cambiar la carpeta' : 'Elegir carpeta') + '</button>' +
       (carpetaEstado === 'lista' ? '<button class="sj-b" data-a="guardarCarpeta">Guardar ahora</button>' : '') +
       '</div>' +
@@ -5380,7 +5128,6 @@
       '<p><b>Dejar nota:</b> tiene su propia solapa. En todas las causas que el PJN habilite o solo en las seleccionadas. Pide confirmar antes de empezar y guarda el resultado de cada causa en la columna Nota.</p>' +
       '<p><b>Descargar:</b> desde la lista, el expediente completo de las causas seleccionadas o las actuaciones que elijas de una causa; desde el expediente, todo o las actuaciones elegidas. Cada causa sale en un PDF.</p>' +
       '<p><b>Escritos, Notificaciones y DEOX:</b> cada uno tiene su solapa, con la bandeja, las fechas, un buscador y el PDF de cada elemento para verlo o descargarlo. Desde el menú ⋯ de una causa, o con los botones del expediente abierto, se ven solo los de esa causa, de cualquier fecha. SuPJN+ abre esas aplicaciones del PJN en segundo plano, con tu misma sesión, y comprueba que sean de la misma cuenta que la Consulta Web; si no lo son, no muestra nada. Lo consultado no se guarda en el equipo.</p>' +
-      '<p><b>Dejar cédula:</b> desde el menú ⋯ de una causa, el expediente abierto, la solapa Notificaciones, cada fila de Escritos, Notificaciones y DEOX, o Funciones del PJN. Abre el formulario de Notificaciones del PJN en una pestaña nueva, carga la jurisdicción, el número y el año, y elige el expediente o el incidente exacto. Los destinatarios, los despachos, el texto y el envío se hacen en el formulario del PJN: SuPJN+ no envía cédulas. Si el PJN no ofrece la causa (solo ofrece aquellas en las que constituiste domicilio electrónico), lo avisa.</p>' +
       '<p><b>Guía judicial:</b> el índice de la Guía del PJN para recorrer por niveles, y una búsqueda por dependencia o por magistrado o funcionario. Muestra domicilio, teléfono, correo e integrantes, y copia esos datos con un botón. Desde una causa, o pulsando la dependencia en Escritos, Notificaciones o DEOX, abre directamente el juzgado que corresponde, con la secretaría o la sala resaltada; si hay más de uno posible, los muestra para elegir.</p>' +
       '<p><b>Funciones del PJN:</b> el menú de la barra azul lleva, en una pestaña nueva, a las listas del PJN, a Radicaciones, a la consulta pública, a los datos personales y a las otras aplicaciones: Escritos, DEOX, Notificaciones, IWECS, Autorizados y Mis eventos del Portal. Por causa: abrir en esta pestaña o en una nueva, libro digital y presentar escrito.</p>' +
       '<h3>¿Algo dejó de funcionar?</h3>' +
@@ -6129,7 +5876,7 @@
     const ini = (B.pagina - 1) * POR_PAGINA_BANDEJA;
     const pag = L.slice(ini, ini + POR_PAGINA_BANDEJA);
     const cols = D.cols;
-    return '<table class="sj-t sj-tb"><colgroup>' + cols.map((c) => '<col style="width:' + c.w + '%">').join('') + '<col style="width:146px"></colgroup><thead><tr>' +
+    return '<table class="sj-t sj-tb"><colgroup>' + cols.map((c) => '<col style="width:' + c.w + '%">').join('') + '<col style="width:118px"></colgroup><thead><tr>' +
       cols.map((c) => '<th data-bo="' + c.k + '" data-v="' + v + '" class="' + (B.orden.col === c.k ? 'act' : '') + '" title="Ordenar por ' + esc(c.t.toLowerCase()) + '">' +
         '<span class="tt">' + esc(c.t) + '</span><span class="fl">' + (B.orden.col === c.k ? (B.orden.desc ? '▼' : '▲') : '↕') + '</span></th>').join('') +
       '<th class="fija"></th></tr></thead><tbody>' +
@@ -6137,7 +5884,6 @@
         '<td class="acc"><div class="sj-acc">' +
         '<button class="sj-abrir" data-a="bandVer" data-v="' + v + '" data-id="' + esc(f.id) + '" title="Ver el PDF en una pestaña nueva">Ver</button>' +
         '<button class="sj-mas" data-a="bandBajar" data-v="' + v + '" data-id="' + esc(f.id) + '" title="Descargar el PDF">⇩</button>' +
-        (f.exp && partesExp(f.exp) ? '<button class="sj-mas" data-a="cedulaUna" data-k="' + esc(f.exp) + '" title="Dejar cédula en esta causa (Notificaciones, pestaña nueva)">✉</button>' : '') +
         (f.eid != null && CUENTA ? '<a class="sj-mas" href="' + esc(urlExpediente(f.eid)) + '" target="_blank" rel="noopener" title="Abrir el expediente en la Consulta Web, en una pestaña nueva">↗</a>' : '') +
         '</div></td></tr>').join('') +
       '</tbody></table>';
@@ -6188,11 +5934,7 @@
           '<label>hasta <input type="date" data-bf="hasta" value="' + esc(B.hasta) + '"></label>') +
       '<button class="sj-b prim" data-a="bandConsultar" data-v="' + v + '"' + (B.estado === 'leyendo' ? ' disabled' : '') + '>Consultar</button>' +
       '<input type="text" data-bf="texto" placeholder="Buscar en lo consultado" value="' + esc(B.texto) + '">' +
-      '<span class="der">' +
-      (v === 'notif' ? '<button class="sj-b prim" data-a="cedulaUna" data-k="' + esc(B.causa ? B.causa.exp : '') + '" title="' +
-        (B.causa ? 'Abre Notificaciones en una pestaña nueva, con esta causa cargada' : 'Abre el formulario de Notificaciones en una pestaña nueva') + '">' +
-        (B.causa ? 'Dejar cédula en esta causa' : 'Nueva cédula') + ' ↗</button>' : '') +
-      '<a class="sj-b" href="' + esc(E.web) + '" target="_blank" rel="noopener noreferrer" title="Abrir ' + esc(E.nombre) + ' del PJN en una pestaña nueva">' + esc(E.nombre) + ' en el PJN ↗</a></span>' +
+      '<span class="der"><a class="sj-b" href="' + esc(E.web) + '" target="_blank" rel="noopener noreferrer" title="Abrir ' + esc(E.nombre) + ' del PJN en una pestaña nueva">' + esc(E.nombre) + ' en el PJN ↗</a></span>' +
       '</div>' +
       '<div class="sj-est" data-e="bandEstado">' + estadoBandejaHTML(v, L) + '</div>' +
       '<div class="sj-cuerpo" data-e="bandCuerpo">' + tablaBandejaHTML(v, L) + '</div>' +
@@ -6689,30 +6431,6 @@
     }
     const res = p.querySelector('[data-e="guiaResaltada"]');
     if (res) res.scrollIntoView({ block: 'nearest' });
-  }
-
-  // Dejar cédula: abre Notificaciones en una pestaña nueva con el expediente
-  // cargado (ver "dejar cédula, en Notificaciones"). Sin expediente, abre el
-  // formulario vacío.
-  function dejarCedula(k) {
-    const url = EXT.notif.origen + RUTA_CEDULA;
-    if (!k) {
-      const w0 = window.open(url, '_blank');
-      if (!w0) avisar('Chrome bloqueó la pestaña nueva. Permití las ventanas emergentes de scw.pjn.gov.ar y probá de nuevo.', true);
-      return;
-    }
-    const px = partesExp(k);
-    if (!px) { avisar('No se reconoce el número de expediente ' + k + '.', true); return; }
-    if (!CUENTA) { avisar('No se pudo identificar con qué cuenta se entró a la Consulta Web, así que no se carga ningún expediente en Notificaciones. Recargá la página.', true); return; }
-    const exp = clave(k);
-    guardarAlmacen(K_CEDULA, { exp, sigla: px.sigla, num: px.num, anio: px.anio, cuenta: CUENTA, ts: Date.now() });
-    const w = window.open(url, '_blank');
-    if (!w) {
-      guardarAlmacen(K_CEDULA, null);
-      avisar('Chrome bloqueó la pestaña nueva. Permití las ventanas emergentes de scw.pjn.gov.ar y probá de nuevo.', true);
-      return;
-    }
-    avisar('Se abrió Notificaciones en una pestaña nueva, con ' + exp + ' cargado. La cédula se completa y se envía desde el formulario del PJN.');
   }
 
   // La dependencia de una causa: la de la lista o la del expediente abierto.
@@ -7630,7 +7348,6 @@
         location.href = u;
         return;
       }
-      case 'cedulaUna': dejarCedula(k); return;
       case 'verEscr': bandejaDeCausa('escr', k); return;
       case 'verNotif': bandejaDeCausa('notif', k); return;
       case 'verDeox': bandejaDeCausa('deox', k); return;
@@ -7733,24 +7450,8 @@
         mostrarContra = false;
         irAVista('marcas');
         avisar('Contraseña guardada. Anotala donde guardes tus claves: sin ella el archivo no se abre en ninguna parte.');
-        // Con la contraseña puesta, la carpeta se lee y se guarda ya.
-        if (CARPETA) {
-          conectarCarpeta(false).then(() => {
-            pintarCopia();
-            if (VISTA === 'marcas') irAVista('marcas');
-            if (carpetaEstado === 'contra' && carpetaBloqueada) avisar('Contraseña guardada, pero no abre el respaldo que hay en la carpeta: ' + carpetaAviso + '.', true);
-          }).catch(() => { /* el estado de la carpeta ya lo informa */ });
-        }
         return;
       }
-      case 'pisarCarpeta':
-        if (!b.classList.contains('peligro')) { b.classList.add('peligro'); b.textContent = 'Confirmar: se reemplaza el respaldo de la carpeta'; return; }
-        pisarCarpeta().then((ok) => {
-          pintarCopia();
-          irAVista('marcas');
-          avisar(ok ? 'Listo: el respaldo de la carpeta tiene ahora los datos de esta PC, con la contraseña de esta PC.' : 'No se pudo guardar en la carpeta: ' + (carpetaAviso || 'revisá el permiso') + '.', !ok);
-        }).catch((e) => avisar('No se pudo guardar en la carpeta: ' + mensajeDe(e) + '.', true));
-        return;
       case 'verContra': mostrarContra = true; irAVista('marcas'); return;
       case 'ocultarContra': mostrarContra = false; irAVista('marcas'); return;
       case 'elegirCarpeta':
@@ -8364,9 +8065,8 @@
       carpetaDePrueba: (h, leida) => { ponerCarpetaDePrueba(h, leida); },
       // Escritos, Notificaciones, DEOX y la Guía.
       tokensGuia, puntajeGuia, mejorGuia, filaEscrito, filaNotif, filaDeox, estadoDeox, destinoDeox, tipoDeox,
-      partesExp, expComparable, fechaAPI, msDe, RUTAS_PUENTE, menuPJNHTML, errorPuente, cuentaDelPuente, K_CEDULA,
-      estadoCarpeta: () => ({ estado: carpetaEstado, aviso: carpetaAviso, bloqueada: carpetaBloqueada }),
-      conectarCarpeta, importarDeCarpeta, pisarCarpeta, MARCA_ARCHIVO: MARCA
+      partesExp, expComparable, fechaAPI, msDe, RUTAS_PUENTE, menuPJNHTML, errorPuente, cuentaDelPuente,
+      estadoCarpeta: () => ({ estado: carpetaEstado, aviso: carpetaAviso })
     });
     return;
   }

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         SuPJN+ - Consulta Web del PJN ampliada
 // @namespace    ignacio.kinbaum
-// @version      0.7.1
-// @description  Ventana única sobre la Consulta Web del PJN: Mis causas y Favoritos, en trámite y fuera de trámite, con búsqueda, filtros, ordenamiento y columnas configurables; etiquetas y anotaciones propias, con copia manual o guardado automático en una carpeta designada; dejar nota en todas las causas habilitadas o en las seleccionadas; descarga de expedientes en PDF eligiendo causas desde la lista o actuaciones desde el expediente; escritos presentados, notificaciones electrónicas y DEOX, generales o de una causa, con sus PDF; dejar cédula con el expediente ya cargado en el formulario del PJN; la Guía judicial navegable y enlazada a cada causa; y acceso a las demás aplicaciones del PJN.
+// @version      0.6.1
+// @description  Ventana única sobre la Consulta Web del PJN: Mis causas y Favoritos, en trámite y fuera de trámite, con búsqueda, filtros, ordenamiento y columnas configurables; etiquetas y anotaciones propias, con copia manual o guardado automático en una carpeta designada; dejar nota en todas las causas habilitadas o en las seleccionadas; descarga de expedientes en PDF eligiendo causas desde la lista o actuaciones desde el expediente; y acceso a las demás aplicaciones del PJN.
 // @author       Ignacio Kinbaum
 // @license      GPL-3.0-or-later
 // @copyright    2026, Ignacio Kinbaum (estudiojuridicokinbaum@gmail.com)
@@ -12,11 +12,8 @@
 // @downloadURL  https://raw.githubusercontent.com/Elzas85/SuPJNPLUS/main/supjn-plus.user.js
 // @match        https://scw.pjn.gov.ar/scw/*
 // @match        https://portalpjn.pjn.gov.ar/*
-// @match        https://escritos.pjn.gov.ar/*
-// @match        https://notif.pjn.gov.ar/*
-// @match        https://deox.pjn.gov.ar/*
-// @match        https://www.pjn.gov.ar/guia*
 // @run-at       document-idle
+// @noframes
 // @sandbox      JavaScript
 // @require      https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js#sha384=weMABwrltA6jWR8DDe9Jp5blk+tZQh7ugpCsF3JwSA53WZM9/14PjS5LAJNHNjAI
 // @grant        GM_getValue
@@ -42,12 +39,8 @@
  *   partes, intervinientes, causas vinculadas y recursos de cada expediente;
  *   dejar nota en todas las causas habilitadas o solo en las seleccionadas;
  *   descarga de expedientes en un PDF, eligiendo causas desde la lista o
- *   actuaciones desde el expediente; solapas propias para los escritos
- *   presentados, las notificaciones electrónicas y los DEOX, en general o de
- *   una causa, con su PDF; dejar cédula, abriendo el formulario de
- *   Notificaciones del PJN con el expediente ya elegido; la Guía judicial,
- *   navegable y enlazada al juzgado de cada causa; y un menú con las demás
- *   aplicaciones del PJN, que se abren en una pestaña nueva.
+ *   actuaciones desde el expediente; y un menú con las demás aplicaciones del
+ *   PJN (escritos, DEOX, notificaciones y las restantes).
  *   Se inicia minimizada, como indicador en el extremo inferior derecho, y aun
  *   así lee las listas en segundo plano. Se despliega por sí sola únicamente
  *   cuando quedó una tanda de dejar nota sin terminar.
@@ -113,28 +106,6 @@
  *       y hay que cotejar el número que menciona con el de la causa en curso.
  *       c) El recorrido se hace por número de expediente, no por posición.
  *
- * ESCRITOS, NOTIFICACIONES, DEOX Y GUÍA (relevado el 17/09/2026, en solo lectura)
- *   Son aplicaciones aparte, cada una en su sitio: escritos.pjn.gov.ar,
- *   notif.pjn.gov.ar y deox.pjn.gov.ar. Las tres tienen una API JSON propia
- *   (/api/escritos, /api/notificaciones, /api/deox) que pide una credencial
- *   del SSO del PJN; la aplicación la obtiene sola con la sesión ya iniciada
- *   y la guarda en su sessionStorage. Las listas se piden por bandeja, con
- *   fechas ddmmaaaa y de a 100 por página como máximo, y se pueden acotar a
- *   una causa por número, año y cámara (la cámara va por su número interno,
- *   que da /api/camaras). El PDF de cada elemento sale de su propia ruta.
- *   La Guía judicial (www.pjn.gov.ar/guia) es pública: /api/dependencia/...
- *   y /api/persona/find.
- *   Ninguno de esos sitios deja que otro lea sus respuestas. Por eso SuPJN+
- *   abre cada aplicación en un MARCO OCULTO: la propia aplicación del PJN
- *   entra con la sesión del SSO, y SuPJN+, que también corre dentro del
- *   marco, hace ahí las consultas y le devuelve los datos a la ventana por
- *   postMessage. Ese puente solo atiende a la Consulta Web, solo cuando es
- *   ella la que abrió el marco, y solo consultas de lectura de una lista
- *   cerrada. Antes de mostrar nada se comprueba que la sesión del marco sea
- *   de la misma cuenta que la de la Consulta Web.
- *   El expediente se abre con /scw/consultaNovedad.seam?identificacion=CUIT
- *   &eid=ID, que es el mismo enlace que usan esas aplicaciones.
- *
  * DESCARGA DE DOCUMENTOS
  *   Las actuaciones se piden con fetch a su propia dirección y se validan por
  *   contenido: un PDF empieza con "%PDF-". Una respuesta correcta que no es un
@@ -154,8 +125,7 @@
  *   para cerrar la sesión al terminar.
  *
  * EL ARCHIVO QUE SALE DEL EQUIPO
- *   La exportación, y desde la 0.7.1 también el archivo de la carpeta de
- *   respaldo, va en formato propio (.supjn), binario y cifrado con una
+ *   La exportación va en formato propio (.supjn), binario y cifrado con una
  *   contraseña del usuario: AES-GCM con clave derivada por PBKDF2, sal distinta
  *   en cada archivo. No se abre con un editor de texto ni lo leen los
  *   indexadores, y sin la contraseña no se recupera en ninguna parte. La
@@ -177,7 +147,7 @@
  *   buscador no se guarda, porque puede ser el nombre de un cliente.
  *   Las etiquetas, las anotaciones y las notas se copian con Exportar; y, si se
  *   designa una carpeta de respaldo (solapa Respaldo), se escriben ahí en
- *   cada cambio, cifradas con la misma contraseña, y se leen al abrir. Esa carpeta la elige el usuario una vez y
+ *   cada cambio y se leen al abrir. Esa carpeta la elige el usuario una vez y
  *   conviene que esté fuera del directorio del programa, para que las
  *   anotaciones no terminen en un repositorio.
  *
@@ -189,328 +159,6 @@
 /* global PDFLib */
 (function () {
   'use strict';
-
-  // ------------------------------------------- el puente, dentro del marco
-  //
-  // En Escritos, Notificaciones, DEOX y la Guía, SuPJN+ no dibuja nada: solo
-  // atiende consultas cuando la Consulta Web abrió esa aplicación en un marco
-  // oculto (ver ESCRITOS, NOTIFICACIONES, DEOX Y GUÍA). Abierta a mano, en su
-  // propia pestaña, la aplicación queda tal cual.
-
-  const ORIGEN_SCW = 'https://scw.pjn.gov.ar';
-  const APPS_PUENTE = {
-    'escritos.pjn.gov.ar': 'escritos',
-    'notif.pjn.gov.ar': 'notif',
-    'deox.pjn.gov.ar': 'deox',
-    'www.pjn.gov.ar': 'guia'
-  };
-  const NOMBRE_MARCO = 'supjn-puente-';
-
-  // Lo que el puente acepta. Todo es de lectura: listas, PDF y datos de la
-  // Guía. Las búsquedas de la Guía van por POST porque así las pide el propio
-  // sitio, pero no cambian nada.
-  const RUTAS_PUENTE = {
-    escritos: { lista: /^\/api\/escritos\?bandeja=[A-Z_]+(&[a-zA-Z]+=[0-9]+)*$/, pdf: /^\/api\/escritos\/\d+\/pdf$/, json: /^\/api\/camaras$/ },
-    notif: { lista: /^\/api\/notificaciones\?bandeja=[A-Z_]+(&[a-zA-Z]+=[0-9]+)*$/, pdf: /^\/api\/notificaciones\/[A-Z_]+\/\d+\/pdf$/, json: /^\/api\/camaras$/ },
-    deox: { lista: /^\/api\/deox\?bandeja=[A-Z_]+(&[a-zA-Z]+=[0-9]+)*$/, pdf: /^\/api\/deox\/[A-Z_]+\/\d+\/pdf$/, json: /^\/api\/camaras$/ },
-    guia: { json: /^\/api\/dependencia\/codigo\/(?!\.)[A-Za-z0-9_.%-]+$/, buscar: /^\/api\/(dependencia|persona)\/find$/ }
-  };
-  const TOPE_PUENTE = 3000;                 // elementos como máximo por consulta
-
-  // La credencial del SSO la obtiene y la renueva la propia aplicación del PJN;
-  // SuPJN+ solo la lee, en el momento de usarla, y nunca la saca de su sitio.
-  // Estas tres funciones no usan nada de lo que se define más abajo: corren
-  // también en las aplicaciones, donde el resto del programa no arranca.
-  function credencialSSO() {
-    try {
-      for (let i = 0; i < sessionStorage.length; i++) {
-        const k = sessionStorage.key(i);
-        if (!/^oidc\.user:/.test(k || '')) continue;
-        const u = JSON.parse(sessionStorage.getItem(k) || 'null');
-        if (u && u.access_token && (!u.expires_at || u.expires_at * 1000 > Date.now() + 15000)) return u;
-      }
-    } catch (e) { /* sin acceso al almacén */ }
-    return null;
-  }
-  async function esperarCredencialSSO(msMax) {
-    const tope = Date.now() + (msMax || 0);
-    for (;;) {
-      const u = credencialSSO();
-      if (u) return u;
-      if (Date.now() >= tope) return null;
-      await new Promise((r) => setTimeout(r, 300));
-    }
-  }
-  // De la credencial solo se usa el CUIT, para comprobar que la cuenta es la
-  // misma que la de la Consulta Web.
-  const cuitSSO = (u) => String((u && u.profile && (u.profile.cuil || u.profile.preferred_username)) || '').replace(/\D/g, '');
-
-  function puenteEnMarco(app) {
-    const publica = app === 'guia';
-    const R = RUTAS_PUENTE[app];
-    const credencialVigente = esperarCredencialSSO;
-    const cuitDe = cuitSSO;
-
-    const enviar = (m) => {
-      try { window.parent.postMessage(Object.assign({ supjn: 'puente', app }, m), ORIGEN_SCW); } catch (e) { /* la ventana ya no está */ }
-    };
-
-    async function pedir(ruta, cuerpo) {
-      const h = { Accept: 'application/json, text/plain, */*' };
-      if (!publica) {
-        const u = await credencialVigente(10000);
-        if (!u) throw new Error('sesion');
-        h.Authorization = 'Bearer ' + u.access_token;
-      }
-      const init = { headers: h, credentials: 'same-origin', cache: 'no-store' };
-      if (cuerpo) {
-        init.method = 'POST';
-        h['Content-Type'] = 'application/json';
-        init.body = JSON.stringify(cuerpo);
-      }
-      const r = await fetch(ruta, init);
-      if (r.status === 401 || r.status === 403) throw new Error('sesion');
-      if (!r.ok) {
-        let m = '';
-        try { const j = await r.json(); m = j && typeof j.message === 'string' ? j.message : ''; } catch (e) { /* sin detalle */ }
-        throw new Error('el sistema respondió con error ' + r.status + (m ? ' (' + m + ')' : ''));
-      }
-      return r;
-    }
-
-    const aJSON = async (r) => {
-      try { return await r.json(); } catch (e) { throw new Error('la respuesta no se pudo leer'); }
-    };
-
-    async function atender(p) {
-      if (p.op === 'estado') {
-        if (publica) return { listo: true };
-        const u = await credencialVigente(p.espera || 0);
-        return { listo: !!u, cuit: cuitDe(u) };
-      }
-      if (p.op === 'json') {
-        if (!(R.json && R.json.test(p.ruta))) throw new Error('consulta no admitida');
-        return aJSON(await pedir(p.ruta));
-      }
-      if (p.op === 'buscar') {
-        if (!(R.buscar && R.buscar.test(p.ruta)) || !p.cuerpo || typeof p.cuerpo !== 'object') throw new Error('consulta no admitida');
-        return aJSON(await pedir(p.ruta, p.cuerpo));
-      }
-      if (p.op === 'lista') {
-        if (!(R.lista && R.lista.test(p.ruta)) || /[?&](page|pageSize)=/.test(p.ruta)) throw new Error('consulta no admitida');
-        const tope = Math.max(1, Math.min(Number(p.tope) || 1000, TOPE_PUENTE));
-        const porPagina = Math.max(1, Math.min(Number(p.porPagina) || 100, 100));
-        const items = [];
-        let total = null;
-        for (let pag = 0; ; pag++) {
-          const j = await aJSON(await pedir(p.ruta + '&page=' + pag + '&pageSize=' + porPagina));
-          if (!j || !Array.isArray(j.items)) throw new Error('la respuesta no trae la lista');
-          if (typeof j.numberOfItems === 'number') total = j.numberOfItems;
-          items.push(...j.items);
-          enviar({ tipo: 'avance', id: p.id, van: items.length, total });
-          if (!j.hasNext || !j.items.length || items.length >= tope) break;
-        }
-        return { items: items.slice(0, tope), total: total == null ? items.length : total };
-      }
-      if (p.op === 'pdf') {
-        if (!(R.pdf && R.pdf.test(p.ruta))) throw new Error('consulta no admitida');
-        const r = await pedir(p.ruta);
-        const buf = await r.arrayBuffer();
-        const b = new Uint8Array(buf, 0, Math.min(5, buf.byteLength));
-        if (String.fromCharCode.apply(null, b) !== '%PDF-') throw new Error('el sistema no devolvió un PDF');
-        return { buf };
-      }
-      throw new Error('consulta no admitida');
-    }
-
-    window.addEventListener('message', (e) => {
-      if (e.origin !== ORIGEN_SCW || e.source !== window.parent) return;
-      const p = e.data;
-      if (!p || p.supjn !== 'pedido' || p.app !== app || typeof p.id !== 'string') return;
-      atender(p).then(
-        (res) => enviar({ tipo: 'respuesta', id: p.id, ok: true, res }),
-        (err) => enviar({ tipo: 'respuesta', id: p.id, ok: false, error: String(err && err.message ? err.message : err) })
-      );
-    });
-
-    // Aviso a la ventana de que el marco ya puede atender: la Guía enseguida;
-    // las otras, cuando la aplicación terminó de entrar con el SSO.
-    if (publica) enviar({ tipo: 'listo' });
-    else credencialVigente(30000).then((u) => { if (u) enviar({ tipo: 'listo', cuit: cuitDe(u) }); });
-  }
-
-  // ----------------------------------------- dejar cédula, en Notificaciones
-  //
-  // SuPJN+ no envía cédulas: abre el formulario de Notificaciones del PJN en una
-  // pestaña nueva, le carga la jurisdicción, el número y el año, pasa al paso
-  // de selección (que solo busca) y elige el expediente o el incidente exacto.
-  // Lo demás (los destinatarios, los despachos, el texto y el envío) se hace en
-  // el formulario del PJN. Relevado el 17/09/2026: el paso 1 tiene la
-  // jurisdicción (#camara-autocomplete), el número y el año; Siguiente busca en
-  // /api/expedientes y, si el PJN no ofrece la causa (solo ofrece aquellas en
-  // las que el letrado constituyó domicilio electrónico), avisa "No hay
-  // resultados para la selección actual" y no avanza. El paso 2 lista la causa
-  // y sus incidentes como "CIV 76436/2025 : carátula".
-  //
-  // El pedido viaja en el almacén de Tampermonkey, que es el mismo en todos los
-  // sitios del programa: la dirección no sirve, porque el ingreso por el SSO la
-  // pierde. Vale cinco minutos, se usa una sola vez y solo con la misma cuenta.
-  const K_CEDULA = 'supjn.cedula.v1';
-  const VIDA_CEDULA = 5 * 60 * 1000;
-  const RUTA_CEDULA = '/nueva';
-
-  function cedulaEnNotif() {
-    if (typeof GM_getValue !== 'function' || typeof GM_setValue !== 'function') return;
-    let p = null;
-    // La Consulta Web lo guarda como texto JSON, igual que el resto del almacén.
-    try { p = GM_getValue(K_CEDULA, null); if (typeof p === 'string') p = JSON.parse(p); } catch (e) { p = null; }
-    if (!p || typeof p !== 'object') return;
-    const vigente = Date.now() - (Number(p.ts) || 0) < VIDA_CEDULA && /^[A-Z]{2,4}$/.test(String(p.sigla || '')) &&
-      Number(p.num) > 0 && Number(p.anio) > 1900 && /^\d{11}$/.test(String(p.cuenta || ''));
-    if (!vigente) return;
-    const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
-    const olvidar = () => { try { GM_setValue(K_CEDULA, null); } catch (e) { /* sin almacén */ } };
-    const corta = (c) => { const x = String(c || ''); return x ? x.slice(0, 2) + '...' + x.slice(-3) : 'sin identificar'; };
-
-    // Un cartel propio, encima del formulario (no tapa ningún botón), que se
-    // cierra con su cruz.
-    const cartel = (texto, malo) => {
-      let c = document.getElementById('supjn-cedula');
-      if (!c) {
-        c = document.createElement('div');
-        c.id = 'supjn-cedula';
-        c.setAttribute('role', 'status');
-        const main = document.querySelector('main');
-        c.style.cssText = (main ? 'position:relative;margin:8px 16px 0;' : 'position:fixed;top:72px;right:16px;z-index:2147483000;max-width:420px;box-shadow:0 8px 24px rgba(0,0,0,.25);') +
-          'padding:10px 34px 10px 14px;border-radius:8px;font:13px/1.45 "Segoe UI",Arial,sans-serif;background:#fff;color:#1d2b36;border:2px solid #14416f';
-        const x = document.createElement('button');
-        x.type = 'button';
-        x.textContent = '×';
-        x.title = 'Cerrar';
-        x.style.cssText = 'position:absolute;top:4px;right:6px;border:0;background:transparent;font:700 18px/1 "Segoe UI",Arial,sans-serif;cursor:pointer;color:#14416f';
-        x.addEventListener('click', () => c.remove());
-        const t = document.createElement('div');
-        t.className = 'txt';
-        c.appendChild(t);
-        c.appendChild(x);
-        if (main) main.insertBefore(c, main.firstChild); else document.body.appendChild(c);
-      }
-      c.style.borderColor = malo ? '#b3261e' : '#14416f';
-      c.querySelector('.txt').textContent = 'SuPJN+: ' + texto;
-    };
-
-    const esperarQue = async (f, msMax) => {
-      const tope = Date.now() + msMax;
-      for (;;) {
-        let v = null;
-        try { v = f(); } catch (e) { v = null; }
-        if (v) return v;
-        if (Date.now() >= tope) return null;
-        await esperar(200);
-      }
-    };
-
-    // React solo toma el valor si se lo escribe como lo haría el teclado.
-    const escribir = (el, v) => {
-      const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
-      d.set.call(el, v);
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      el.dispatchEvent(new Event('blur', { bubbles: true }));
-    };
-
-    const opcionCamara = () => [...document.querySelectorAll('[role="option"]')]
-      .find((o) => String(o.textContent || '').split('-')[0].trim() === p.sigla) || null;
-
-    // "CIV 076436/2025/1" y "CIV 76436/2025/1" son el mismo expediente.
-    const sinCeros = (t) => String(t || '').toUpperCase().replace(/\s+/g, ' ').trim().replace(/^([A-Z]{2,4}) 0*(\d)/, '$1 $2');
-    const buscado = sinCeros(p.exp);
-    const opcionesExp = () => [...document.querySelectorAll('[id^="form-list-autocomplete-listbox-expediente"] [role="option"]')];
-    const sinResultados = () => [...document.querySelectorAll('[role="alert"], .MuiAlert-message, .MuiSnackbarContent-message, .MuiSnackbar-root')]
-      .some((e) => /no hay resultados/i.test(e.textContent || ''));
-
-    // Siguiente, en el paso 1, solo busca la causa. Después: o aparece la lista
-    // del paso 2, o el PJN dice que no hay resultados.
-    async function elegirExpediente() {
-      const sig = document.getElementById('StepperNextBtn') ||
-        [...document.querySelectorAll('button')].find((b) => /^siguiente$/i.test(String(b.textContent || '').trim()));
-      if (!sig) return 'sin boton';
-      sig.click();
-      const r = await esperarQue(() => (opcionesExp().length ? 'lista' : sinResultados() ? 'nada' : null), 15000);
-      if (r !== 'lista') return r || 'sin respuesta';
-      const exacta = opcionesExp().find((o) => sinCeros(String(o.textContent || '').split(' : ')[0]) === buscado);
-      if (!exacta) return 'sin exacta';
-      exacta.click();
-      await esperar(300);
-      return 'elegida';
-    }
-
-    async function completar(campos) {
-      const [cam, num, anio] = campos;
-      cam.focus();
-      cam.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-      let op = await esperarQue(opcionCamara, 3000);
-      if (!op) {
-        const raiz = cam.closest('.MuiAutocomplete-root') || cam.parentElement;
-        const abrir = raiz && raiz.querySelector('.MuiAutocomplete-popupIndicator, button[aria-label]');
-        if (abrir) abrir.click();
-        op = await esperarQue(opcionCamara, 3000);
-      }
-      if (!op) return false;
-      op.click();
-      await esperar(250);
-      cam.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      cam.blur();
-      escribir(num, String(p.num));
-      escribir(anio, String(p.anio));
-      await esperar(250);
-      return String(cam.value || '').split('-')[0].trim() === p.sigla && num.value === String(p.num) && anio.value === String(p.anio);
-    }
-
-    (async () => {
-      // Hasta que la aplicación entra con el SSO no se hace nada. Si pide
-      // ingresar, la página se va y el pedido sigue esperando.
-      const u = await esperarCredencialSSO(60000);
-      if (!u) return;
-      const cuit = cuitSSO(u);
-      if (cuit !== String(p.cuenta)) {
-        olvidar();
-        cartel('no se cargó ' + p.exp + ': Notificaciones está abierto con otra cuenta (' + corta(cuit) + ') y no con la de la Consulta Web (' + corta(p.cuenta) + ').', true);
-        return;
-      }
-      if (location.pathname !== RUTA_CEDULA) { location.assign(RUTA_CEDULA); return; }
-      olvidar();
-      const campos = await esperarQue(() => {
-        const c = [document.getElementById('camara-autocomplete'), document.querySelector('input[name="numeroExpediente"]'), document.querySelector('input[name="anioExpediente"]')];
-        return c.every(Boolean) ? c : null;
-      }, 20000);
-      if (!campos) { cartel('no se encontró el formulario para cargar ' + p.exp + '. Completalo a mano.', true); return; }
-      let ok = false;
-      try { ok = await completar(campos); } catch (e) { ok = false; }
-      if (!ok) { cartel('no se pudieron cargar los datos de ' + p.exp + '. Completalo a mano.', true); return; }
-      let r = '';
-      try { r = await elegirExpediente(); } catch (e) { r = ''; }
-      const sigue = ' Seguí con Siguiente: los destinatarios, los despachos y el texto. La cédula se envía desde este formulario; SuPJN+ no envía nada.';
-      if (r === 'elegida') cartel('se eligió ' + buscado + '.' + sigue);
-      else if (r === 'sin exacta') cartel('el PJN ofrece la causa, pero no ' + buscado + ' con ese número exacto: elegí en la lista el expediente o el incidente.' + sigue);
-      else if (r === 'nada') cartel('el PJN no ofrece ' + buscado + ' para dejar cédula con esta cuenta. En Notificaciones solo aparecen las causas en las que constituiste domicilio electrónico.', true);
-      else cartel('se cargaron la jurisdicción, el número y el año de ' + buscado + '. Pulsá Siguiente y elegí el expediente o el incidente.' + sigue);
-    })();
-  }
-
-  const APP_PUENTE = APPS_PUENTE[location.hostname];
-  if (APP_PUENTE) {
-    let deLaConsulta = false;
-    try {
-      // En Chrome, ancestorOrigins dice quién abrió el marco. Aunque faltara, el
-      // puente igual solo le contesta a la Consulta Web.
-      const anc = location.ancestorOrigins;
-      deLaConsulta = window.top !== window.self && (!anc || !anc.length || anc[0] === ORIGEN_SCW);
-    } catch (e) { deLaConsulta = false; }
-    if (deLaConsulta && String(window.name || '').indexOf(NOMBRE_MARCO) === 0) puenteEnMarco(APP_PUENTE);
-    else if (APP_PUENTE === 'notif' && window.top === window.self) cedulaEnNotif();
-    return;
-  }
 
   // Nunca dentro de un marco: SuPJN+ lee en marcos ocultos y ahí no arranca nada.
   if (window.top !== window.self) return;
@@ -528,7 +176,7 @@
 
   const APP = {
     nombre: 'SuPJN+',
-    version: 'beta 0.7.1',
+    version: 'beta 0.6.1',
     autor: 'Ignacio Kinbaum',
     anio: '2026',
     mail: 'estudiojuridicokinbaum@gmail.com',
@@ -588,7 +236,6 @@
   // Aplicaciones del PJN, tal como las lista el Portal PJN (relevado 11/09/2026).
   const APPS_PJN = [
     { t: 'Mis eventos (Portal PJN)', u: 'https://portalpjn.pjn.gov.ar/inicio' },
-    { t: 'Nueva cédula electrónica', u: 'https://notif.pjn.gov.ar/nueva' },
     { t: 'Notificaciones electrónicas', u: 'https://notif.pjn.gov.ar/' },
     { t: 'Escritos (presentar y ver presentados)', u: 'https://escritos.pjn.gov.ar/' },
     { t: 'DEOX (oficios electrónicos)', u: 'https://deox.pjn.gov.ar/deox/' },
@@ -3045,21 +2692,9 @@
   // pisarse, y el archivo de una cuenta no se importa en la otra. El nombre
   // incluye el número de cuenta, que también figura dentro del archivo y es lo
   // que se coteja al importar.
-  //
-  // Desde la 0.7.1 el archivo de la carpeta va cifrado, con la misma contraseña
-  // y el mismo formato que la exportación (pedido del autor, 17/09/2026): la
-  // carpeta suele estar sincronizada con la nube, y ahí el archivo sale del
-  // equipo. En el uso diario no se pide nada, porque se usa la contraseña
-  // guardada en esta PC. Sin contraseña no se escribe en la carpeta, y un
-  // respaldo cifrado que esta PC no puede abrir tampoco se pisa. El JSON en
-  // claro de las versiones anteriores se lee una vez y se borra cuando ya quedó
-  // escrito el cifrado.
-  const archivoRespaldo = () => 'SuPJN+-datos-' + CUENTA + EXT_ARCHIVO;
-  const archivoRespaldoViejo = () => 'SuPJN+-datos-' + CUENTA + '.json';
-  let carpetaBloqueada = false;  // hay un respaldo cifrado que esta PC no pudo abrir
-  let viejoLeido = false;        // el JSON en claro ya se importó y se puede borrar
+  const archivoRespaldo = () => 'SuPJN+-datos-' + CUENTA + '.json';
   let CARPETA = null;            // la carpeta elegida (handle del navegador)
-  let carpetaEstado = 'nada';    // nada | lista | pedir | falta | contra | error
+  let carpetaEstado = 'nada';    // nada | lista | pedir | falta | error
   let carpetaTexto = '';
   let carpetaAviso = '';         // por qué falló la última vez, en castellano
 
@@ -3141,31 +2776,17 @@
     // Nunca se escribe antes de haber leído lo que hay en la carpeta. Si no, una
     // limpieza del navegador dejaría la copia buena pisada por una vacía.
     if (!leyoLaCarpeta) { carpetaAviso = 'todavía se está leyendo el contenido de la carpeta'; return false; }
-    if (carpetaBloqueada) { carpetaEstado = 'contra'; return false; }
-    const contra = leerContra();
-    if (!contra) {
-      carpetaEstado = 'contra';
-      carpetaAviso = 'para guardar en la carpeta hace falta la contraseña de tus copias';
-      return false;
-    }
     if (!(await permisoCarpeta(CARPETA, false))) {
       carpetaEstado = 'pedir';
       carpetaAviso = 'Chrome pide confirmar otra vez el permiso de la carpeta.';
       return false;
     }
-    let datos;
-    try {
-      datos = await protegerTexto(datosRespaldo(), contra);
-    } catch (e) {
-      carpetaEstado = 'error';
-      carpetaAviso = mensajeDe(e);
-      return false;
-    }
+    const texto = datosRespaldo();
     let w = null;
     try {
       const fh = await CARPETA.getFileHandle(archivoRespaldo(), { create: true });
       w = await fh.createWritable();
-      await w.write(datos);
+      await w.write(texto);
       await w.close();
       w = null;
     } catch (e) {
@@ -3189,14 +2810,6 @@
     guardarEnCuenta(K_RESPALDO, RESPALDO);
     carpetaEstado = 'lista';
     carpetaAviso = '';
-    // Con el cifrado ya escrito, la copia en claro de las versiones anteriores
-    // se borra, pero solo si se la leyó y era de esta cuenta: si no, quedaría
-    // algo sin traer. Si no se puede borrar, se reintenta en la próxima escritura.
-    if (viejoLeido && typeof CARPETA.removeEntry === 'function') {
-      try { await CARPETA.removeEntry(archivoRespaldoViejo()); viejoLeido = false; } catch (e) {
-        if (/NotFound/i.test(String((e && e.name) || ''))) viejoLeido = false;
-      }
-    }
     return true;
   }
 
@@ -3221,63 +2834,27 @@
       .catch(() => { respaldoPendiente = true; carpetaEstado = 'error'; carpetaAviso = 'No se pudo guardar en la carpeta.'; pintarCopia(); });
   }
 
-  // Solo se importa lo que dice ser de esta cuenta. Un archivo sin cuenta
-  // adentro es de una versión anterior: se trae manualmente con Importar.
-  function importarTextoCarpeta(texto) {
-    let d = null;
-    try { d = JSON.parse(texto); } catch (e) { d = null; }
-    if (!d || d.cuenta !== CUENTA) {
-      if (d) carpetaAviso = 'el archivo de la carpeta no dice ser de esta cuenta, así que no se importó automáticamente';
-      return null;
-    }
-    const r = importarMarcas(texto);
-    return typeof r === 'string' ? null : r;
-  }
-
-  const bytesDeCarpeta = async (nombre) => {
-    try {
-      const fh = await CARPETA.getFileHandle(nombre);
-      return new Uint8Array(await (await fh.getFile()).arrayBuffer());
-    } catch (e) { return null; }   // no hay archivo
-  };
-
   async function importarDeCarpeta() {
     if (!CARPETA || !CUENTA) return null;
     if (!(await permisoCarpeta(CARPETA, false))) return null;
-    carpetaBloqueada = false;
-    viejoLeido = false;
-    // Primero el respaldo cifrado.
-    const cifrado = await bytesDeCarpeta(archivoRespaldo());
-    if (cifrado) {
-      let texto;
-      try {
-        texto = await desprotegerTexto(cifrado, leerContra());
-      } catch (e) {
-        // Sin poder leerlo tampoco se escribe: se pisaría el respaldo bueno.
-        carpetaBloqueada = true;
-        carpetaAviso = hayContra()
-          ? 'la contraseña guardada en esta PC no abre el respaldo de la carpeta'
-          : 'el respaldo de la carpeta tiene contraseña y en esta PC todavía no está puesta';
+    try {
+      const fh = await CARPETA.getFileHandle(archivoRespaldo());
+      const f = await fh.getFile();
+      // La carpeta de sincronización se escribe y se lee en claro: es una
+      // carpeta del usuario en su propio equipo, y su archivo no sale de ahí.
+      // Lo que va con contraseña es la exportación, que sí se lleva.
+      const texto = await f.text();
+      // Solo se importa solo lo que dice ser de esta cuenta. Un archivo sin
+      // cuenta adentro es de una versión anterior: se trae manualmente con Importar.
+      let d = null;
+      try { d = JSON.parse(texto); } catch (e2) { d = null; }
+      if (!d || d.cuenta !== CUENTA) {
+        if (d) carpetaAviso = 'el archivo de la carpeta no dice ser de esta cuenta, así que no se importó automáticamente';
         return null;
       }
-      return importarTextoCarpeta(texto);
-    }
-    // Si no hay, el JSON en claro de las versiones anteriores.
-    const viejo = await bytesDeCarpeta(archivoRespaldoViejo());
-    if (!viejo) return null;
-    const r = importarTextoCarpeta(new TextDecoder().decode(viejo));
-    if (r) viejoLeido = true;
-    return r;
-  }
-
-  // Reemplazar el respaldo de la carpeta que esta PC no puede abrir (por
-  // ejemplo, después de cambiar la contraseña) con los datos de esta PC. Lo
-  // que estuviera solo en ese archivo se pierde: por eso se pide confirmar.
-  async function pisarCarpeta() {
-    if (!CARPETA || !CUENTA || !hayContra()) return false;
-    carpetaBloqueada = false;
-    leyoLaCarpeta = true;
-    return escribirEnCarpeta();
+      const r = importarMarcas(texto);
+      return typeof r === 'string' ? null : r;
+    } catch (e) { return null; }   // todavía no hay archivo
   }
 
   // Elegir la carpeta: la pide el navegador y tiene que salir de un clic.
@@ -3316,7 +2893,6 @@
       carpetaEstado = 'lista';
       carpetaAviso = '';
       const r = await importarDeCarpeta();
-      if (carpetaBloqueada) { carpetaEstado = 'contra'; return false; }
       leyoLaCarpeta = true;
       await escribirEnCarpeta();
       return r || true;
@@ -3332,8 +2908,6 @@
   function ponerCarpetaDePrueba(h, leida) {
     CARPETA = h;
     leyoLaCarpeta = !!leida;
-    carpetaBloqueada = false;
-    viejoLeido = false;
     carpetaEstado = h ? 'lista' : 'nada';
     carpetaAviso = '';
     colaRespaldo = Promise.resolve(false);
@@ -3833,7 +3407,7 @@
 
   // ------------------------------------------------------- estado de la vista
 
-  let VISTA = 'rel';            // rel | fav | exp | escr | notif | deox | guia | nota | desc | marcas | acerca
+  let VISTA = 'rel';            // rel | fav | exp | nota | desc | marcas | acerca
   const SEL = { rel: new Set(), fav: new Set() };
   const PAGINA_VISTA = { rel: 1, fav: 1 };
   let abierta = null;           // causa con el detalle de etiquetas desplegado
@@ -4154,34 +3728,7 @@
     '.sj-elegir .pie{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:8px 10px;border-top:1px solid #e6ecef;background:#f5f8fa}',
     '.sj-redim{position:absolute;right:0;bottom:0;width:18px;height:18px;cursor:nwse-resize;z-index:40;background:linear-gradient(135deg,transparent 50%,#9fb3c4 50%,#9fb3c4 60%,transparent 60%,transparent 70%,#9fb3c4 70%,#9fb3c4 80%,transparent 80%)}',
     '#supjn.maxi .sj-redim{display:none}',
-    '#supjn a{color:#0a6cab}',
-    // Escritos, Notificaciones, DEOX y Guía.
-    '.sj-bandeja{display:flex;flex-direction:column;height:100%;min-height:0}',
-    '.sj-barra a.sj-b,.sj-guia a.sj-b{display:inline-flex;align-items:center;text-decoration:none;color:' + AZUL + '}',
-    '.sj-barra a.sj-b:hover,.sj-guia a.sj-b:hover{background:#dbe8f5;text-decoration:none}',
-    '.sj-causa{display:inline-flex;align-items:center;gap:6px;background:#fff4d6;color:#5c4400;border:1px solid #f0dca0;border-radius:15px;padding:0 4px 0 11px;font:600 12px "Segoe UI",Arial,sans-serif;white-space:nowrap}',
-    '.sj-causa button{border:0;background:transparent;color:#5c4400;cursor:pointer;font:700 15px/1 "Segoe UI",Arial,sans-serif;padding:2px 6px;border-radius:10px}',
-    '.sj-causa button:hover{background:#f0dca0}',
-    'table.sj-tb{width:100%}',
-    'table.sj-tb th{position:sticky;cursor:pointer}',
-    'table.sj-tb th:hover{background:#1c5591}',
-    'table.sj-tb th.fija{cursor:default}',
-    'table.sj-tb td.acc{white-space:nowrap}',
-    '.sj-car{margin-top:2px;color:#3a4c54;font-size:12px}',
-    '.sj-sub{margin-top:2px;color:#6b7c85;font-size:11.5px}',
-    '.sj-vinculo{background:none;border:0;padding:0;color:#0a6cab;cursor:pointer;text-align:left;font:inherit}',
-    '.sj-vinculo:hover{text-decoration:underline}',
-    'a.sj-mas{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}',
-    'a.sj-mas:hover{text-decoration:none}',
-    '.sj-urg{background:#b3261e;color:#fff;border-radius:8px;padding:0 6px;font-size:10.5px;font-weight:700;margin-left:6px}',
-    '.sj-info{padding:7px 16px;font-size:12px;color:#123f6b;background:#e8f1fb;border-bottom:1px solid #c7dbef}',
-    '.sj-guia h3{margin:0 0 6px;font-size:16px;color:' + AZUL + '}',
-    '.sj-guia p{margin:2px 0}',
-    '.sj-guia .bts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}',
-    '.sj-guia-nav{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}',
-    '.sj-guia-nav:empty{display:none}',
-    '.sj-guia table.sj-t{width:100%;table-layout:auto}',
-    '.sj-guia table.sj-t tr.res td{background:#fff8dc}'
+    '#supjn a{color:#0a6cab}'
   ].join('\n');
 
   // ------------------------------------------------------------------ ventana
@@ -4234,12 +3781,6 @@
     if (!e) return;
     const s = [['rel', 'Mis causas', DATOS.rel ? DATOS.rel.total : null], ['fav', 'Favoritos', DATOS.fav ? DATOS.fav.total : null]];
     if (EN_EXPEDIENTE && !expCerrado) s.push(['exp', 'Este expediente', null, '', true]);
-    // Las otras aplicaciones del PJN: el número es lo consultado, si ya se consultó.
-    const cantBandeja = (v) => (BAND[v].estado === 'listo' ? BAND[v].filas.length : BAND[v].estado === 'leyendo' ? '...' : null);
-    s.push(['escr', 'Escritos', cantBandeja('escr'), 'Escritos presentados, del sistema de Escritos del PJN']);
-    s.push(['notif', 'Notificaciones', cantBandeja('notif'), 'Notificaciones electrónicas']);
-    s.push(['deox', 'DEOX', cantBandeja('deox'), 'Oficios electrónicos (DEOX)']);
-    s.push(['guia', 'Guía', null, 'Guía judicial del PJN: dependencias, domicilios, teléfonos e integrantes']);
     const c = leerCorrida();
     s.push(['nota', 'Dejar nota', (c && c.activa) ? progresoNota(c) : (SEL[listaActual()].size || null)]);
     const activos = COLA.filter((t) => /en cola|abriendo|leyendo|descargando|a descargar|eligiendo/.test(t.estado)).length;
@@ -4357,10 +3898,7 @@
     const e = q('[data-e="copia"]');
     if (!e) return;
     const hayMarcas = Object.keys(MARCAS.filas).length > 0;
-    if (CARPETA && carpetaEstado === 'contra') {
-      e.className = 'sj-copia vieja';
-      e.textContent = 'La carpeta de respaldo espera la contraseña';
-    } else if (!RESPALDO || !RESPALDO.fecha) {
+    if (!RESPALDO || !RESPALDO.fecha) {
       e.className = 'sj-copia ' + (hayMarcas ? 'nunca' : 'ok');
       e.textContent = hayMarcas ? 'Sin copia de etiquetas y anotaciones' : 'Todavía no hay etiquetas ni anotaciones';
     } else {
@@ -4820,18 +4358,15 @@
   const RE_SALIR = /^(cerrar sesi[oó]n|salir|cerrar la sesi[oó]n|logout|log out|desconectar)$/i;
   const enlaceSalirPJN = () => enlacePJN('a', RE_SALIR);
 
-  // Todas las funciones del PJN se abren en una pestaña nueva, pedido del
-  // autor: la pestaña donde está SuPJN+ no se mueve. Las de la Consulta Web
-  // llevan noopener pero no noreferrer, que el sitio es el mismo.
   function menuPJNHTML() {
-    const it = (u, t, ext) => '<a class="it" href="' + esc(u) + '" target="_blank" rel="' + (ext ? 'noopener noreferrer' : 'noopener') + '">' + esc(t) + ' ↗</a>';
+    const it = (u, t, ext) => '<a class="it" href="' + esc(u) + '"' + (ext ? ' target="_blank" rel="noopener noreferrer"' : '') + '>' + esc(t) + (ext ? ' ↗' : '') + '</a>';
     const nueva = enlacePJN('a[id$="menuNuevaConsulta"]');
     const rad = enlacePJN('a[id$="btn-lista-noIniciados"]') || RUTA.rad;
     const datos = enlacePJN('a', /^datos personales$/i);
     // El enlace de salida del PJN: se lo busca por el texto, porque el sitio no
     // le pone un identificador estable. Si cambia, "Revisar el PJN" lo marca.
     const salir = enlaceSalirPJN();
-    return '<div class="tit">Consulta Web (pestaña nueva)</div>' +
+    return '<div class="tit">Consulta Web</div>' +
       it(RUTA.rel, 'Relacionados (lista del PJN)') + it(RUTA.fav, 'Favoritos (lista del PJN)') + it(rad, 'Radicaciones') +
       (nueva ? it(nueva, 'Nueva consulta pública') : '') + (datos ? it(datos, 'Datos personales') : '') +
       (salir ? '<div class="sep"></div><button class="it" data-a="salirPJN">Cerrar sesión del PJN</button>' : '') +
@@ -4867,12 +4402,6 @@
       '<div class="sep"></div>' +
       it('notaUna', 'Dejar nota en esta causa', !enRel || b, soloRel) +
       it('marcasUna', 'Etiquetas y anotaciones') +
-      '<div class="sep"></div>' +
-      it('cedulaUna', 'Dejar cédula (Notificaciones, pestaña nueva)') +
-      it('verEscr', 'Escritos presentados en esta causa') +
-      it('verNotif', 'Notificaciones de esta causa') +
-      it('verDeox', 'DEOX de esta causa') +
-      it('verGuia', 'Datos del juzgado (Guía judicial)', !depDe(k), depDe(k) ? '' : 'No se conoce la dependencia de esta causa') +
       ((causaPorClave(k) && esNovedad(causaPorClave(k))) ? it('vistoUna', 'Marcar como vista') : '');
   }
 
@@ -4947,14 +4476,7 @@
       '<div class="sj-exp-bts"><button class="sj-b" data-a="volverLista">Volver a Mis causas</button>' +
       (botonPJN(/^dejar nota$/i) ? '<button class="sj-b" data-a="notaPJN" title="Usa el botón del PJN, que pide confirmar">Dejar nota en esta causa</button>' : '') +
       (botonPJN(/presentar escrito/i) ? '<button class="sj-b" data-a="escritoPJN">Presentar escrito</button>' : '') +
-      '<button class="sj-b" data-a="recargar">Recargar la página</button></div>' +
-      (k ? '<div class="sj-exp-bts"><button class="sj-b prim" data-a="cedulaUna" data-k="' + esc(k) + '" title="Abre Notificaciones en una pestaña nueva, con este expediente cargado">Dejar cédula</button>' +
-        '<button class="sj-b" data-a="verEscr" data-k="' + esc(k) + '" title="Los escritos presentados en esta causa, de cualquier fecha">Escritos</button>' +
-        '<button class="sj-b" data-a="verNotif" data-k="' + esc(k) + '" title="Las notificaciones electrónicas de esta causa, de cualquier fecha">Notificaciones</button>' +
-        '<button class="sj-b" data-a="verDeox" data-k="' + esc(k) + '" title="Los oficios electrónicos de esta causa, de cualquier fecha">DEOX</button>' +
-        (d.dep ? '<button class="sj-b" data-a="verGuia" data-k="' + esc(k) + '" title="Domicilio, teléfono e integrantes de la dependencia, según la Guía judicial">Juzgado en la Guía</button>' : '') +
-        '</div>' : '') +
-      '</div>' +
+      '<button class="sj-b" data-a="recargar">Recargar la página</button></div></div>' +
       '<div class="sj-sec"><h4>Actuaciones con PDF</h4><div data-e="expEstado"></div><div data-e="expElegir"></div></div>' +
       solapaExpHTML('int') + solapaExpHTML('vin') + solapaExpHTML('rec') +
       (k ? '<div class="sj-sec" data-marca="' + esc(k) + '">' + editorMarcasHTML(k) + '</div>' : '');
@@ -4995,8 +4517,7 @@
       s.filas.map((f) => '<tr>' + f.map((v, i) => '<td' + (i === 0 ? ' class="sj-exp"' : '') + '>' + esc(v) + '</td>').join('') +
         (acciones ? '<td class="acc"><div class="sj-acc"><button class="sj-abrir" data-a="abrirVinc" data-k="' + esc(f[0]) + '" title="Abrir esta causa vinculada en esta pestaña">Abrir</button>' +
           '<button class="sj-mas" data-a="abrirVincNueva" data-k="' + esc(f[0]) + '" title="Abrirla en una pestaña nueva">↗</button>' +
-          '<button class="sj-mas" data-a="bajarVinc" data-k="' + esc(f[0]) + '" title="Descargar el expediente completo de esta causa vinculada">⇩</button>' +
-          '<button class="sj-mas" data-a="cedulaUna" data-k="' + esc(f[0]) + '" title="Dejar cédula en esta causa vinculada (Notificaciones, pestaña nueva)">✉</button></div></td>' : '') +
+          '<button class="sj-mas" data-a="bajarVinc" data-k="' + esc(f[0]) + '" title="Descargar el expediente completo de esta causa vinculada">⇩</button></div></td>' : '') +
         '</tr>').join('') + '</tbody></table></div>' +
       '<div class="sj-sol-txt' + (s.completa === false ? ' mal' : '') + '">' +
       esc(s.completa === false
@@ -5210,14 +4731,14 @@
   function contraHTML() {
     const puesta = hayContra();
     return '<h3>Contraseña de tus copias</h3>' +
-      '<p>El archivo que exportás, y el que se guarda en la carpeta de respaldo, salen en formato propio de SuPJN+, no como texto: no se abren con el Bloc de notas ' +
-      'ni los leen los buscadores de escritorio o de la nube, y hace falta la contraseña para abrirlos. ' +
+      '<p>El archivo que exportás sale en formato propio de SuPJN+, no como texto: no se abre con el Bloc de notas ' +
+      'ni lo leen los buscadores de escritorio o de la nube, y hace falta la contraseña para abrirlo. ' +
       'Es la protección del archivo cuando sale de esta PC, que es donde queda fuera de tu control.</p>' +
       (puesta
-        ? '<p><b>Contraseña puesta.</b> En esta PC no se te pide: ni para exportar, ni para importar, ni para la carpeta. ' +
-          'En otra máquina hay que ponerla una vez, para importar el archivo o para leer la carpeta.</p>' +
+        ? '<p><b>Contraseña puesta.</b> En esta PC no se te pide: ni para exportar ni para importar. ' +
+          'Te la va a pedir SuPJN+ en otra máquina, cuando importes ahí el archivo.</p>' +
           '<div class="bts"><button class="sj-b" data-a="verContra">Ver o cambiar la contraseña</button></div>'
-        : '<p style="color:#8a5a00">Todavía no pusiste contraseña, así que no se puede exportar ni guardar en la carpeta. ' +
+        : '<p style="color:#8a5a00">Todavía no pusiste contraseña, así que no se puede exportar. ' +
           'Poné una y anotala donde guardes tus claves: sin ella, el archivo no se abre en ninguna parte, ' +
           'tampoco acá si perdés esta PC.</p>') +
       (puesta && mostrarContra
@@ -5239,14 +4760,7 @@
       plural(et.length, 'etiqueta', 'etiquetas') + '</b> y <b>' + plural(marcadas, 'causa marcada', 'causas marcadas') + '</b>.</p>' +
       '<h3>Carpeta de respaldo</h3>' +
       '<p>' + (carpetaEstado === 'lista'
-        ? 'Guardando solo en <b>' + esc(carpetaTexto) + '</b>: cada cambio se escribe ahí, cifrado con la contraseña de tus copias, y al abrir SuPJN+ se lee lo que haya (sirve para trabajar en dos PC con la carpeta sincronizada; en la otra PC tiene que estar puesta la misma contraseña).'
-        : carpetaEstado === 'contra'
-          ? 'Hay una carpeta elegida (<b>' + esc(carpetaTexto) + '</b>), pero ' + (carpetaBloqueada
-            ? (hayContra()
-              ? 'la contraseña de esta PC no abre el respaldo que hay ahí. Poné la misma contraseña que usaste en la otra PC, con "Ver o cambiar la contraseña". Si cambiaste la contraseña a propósito, podés reemplazar ese respaldo con los datos de esta PC.'
-              : 'el respaldo que hay ahí tiene contraseña. Poné la misma que usaste en la otra PC, más abajo, y se lee enseguida.')
-            : 'para guardar ahí hace falta la contraseña de tus copias. Ponela más abajo y se guarda enseguida.') +
-            ' Mientras tanto no se escribe nada en la carpeta.'
+        ? 'Guardando solo en <b>' + esc(carpetaTexto) + '</b>: cada cambio se escribe ahí, y al abrir SuPJN+ se lee lo que haya (sirve para trabajar en dos PC con la carpeta sincronizada).'
         : carpetaEstado === 'pedir'
           ? 'Hay una carpeta elegida (<b>' + esc(carpetaTexto) + '</b>), pero Chrome pide confirmar el permiso otra vez. Mientras tanto no se guarda nada ahí.'
           : carpetaEstado === 'falta'
@@ -5256,7 +4770,6 @@
               : 'Elegí dónde tenés el respaldo, el cual tenés que hacer manualmente. Consejo: guardalo en la nube para compartirlo con otra PC.') + '</p>' +
       '<div class="bts">' +
       (carpetaEstado === 'pedir' ? '<button class="sj-b prim" data-a="conectarCarpeta">Volver a permitir la carpeta</button>' : '') +
-      (carpetaEstado === 'contra' && carpetaBloqueada && hayContra() ? '<button class="sj-b" data-a="pisarCarpeta" title="Lo que esté solo en el respaldo de la carpeta se pierde">Reemplazar el respaldo de la carpeta con los datos de esta PC</button>' : '') +
       '<button class="sj-b' + (carpetaEstado === 'lista' ? '' : ' prim') + '" data-a="elegirCarpeta">' + (carpetaEstado === 'lista' ? 'Cambiar la carpeta' : 'Elegir carpeta') + '</button>' +
       (carpetaEstado === 'lista' ? '<button class="sj-b" data-a="guardarCarpeta">Guardar ahora</button>' : '') +
       '</div>' +
@@ -5379,19 +4892,16 @@
       '<p><b>Encuadre y zoom:</b> de manera predeterminada la tabla entra siempre en el ancho de la ventana, de modo que el ancho que gana una columna lo pierden las otras; el encuadre se desactiva desde <b>Columnas</b>. El zoom de la barra de título agranda lo de adentro sin mover la ventana.</p>' +
       '<p><b>Dejar nota:</b> tiene su propia solapa. En todas las causas que el PJN habilite o solo en las seleccionadas. Pide confirmar antes de empezar y guarda el resultado de cada causa en la columna Nota.</p>' +
       '<p><b>Descargar:</b> desde la lista, el expediente completo de las causas seleccionadas o las actuaciones que elijas de una causa; desde el expediente, todo o las actuaciones elegidas. Cada causa sale en un PDF.</p>' +
-      '<p><b>Escritos, Notificaciones y DEOX:</b> cada uno tiene su solapa, con la bandeja, las fechas, un buscador y el PDF de cada elemento para verlo o descargarlo. Desde el menú ⋯ de una causa, o con los botones del expediente abierto, se ven solo los de esa causa, de cualquier fecha. SuPJN+ abre esas aplicaciones del PJN en segundo plano, con tu misma sesión, y comprueba que sean de la misma cuenta que la Consulta Web; si no lo son, no muestra nada. Lo consultado no se guarda en el equipo.</p>' +
-      '<p><b>Dejar cédula:</b> desde el menú ⋯ de una causa, el expediente abierto, la solapa Notificaciones, cada fila de Escritos, Notificaciones y DEOX, o Funciones del PJN. Abre el formulario de Notificaciones del PJN en una pestaña nueva, carga la jurisdicción, el número y el año, y elige el expediente o el incidente exacto. Los destinatarios, los despachos, el texto y el envío se hacen en el formulario del PJN: SuPJN+ no envía cédulas. Si el PJN no ofrece la causa (solo ofrece aquellas en las que constituiste domicilio electrónico), lo avisa.</p>' +
-      '<p><b>Guía judicial:</b> el índice de la Guía del PJN para recorrer por niveles, y una búsqueda por dependencia o por magistrado o funcionario. Muestra domicilio, teléfono, correo e integrantes, y copia esos datos con un botón. Desde una causa, o pulsando la dependencia en Escritos, Notificaciones o DEOX, abre directamente el juzgado que corresponde, con la secretaría o la sala resaltada; si hay más de uno posible, los muestra para elegir.</p>' +
-      '<p><b>Funciones del PJN:</b> el menú de la barra azul lleva, en una pestaña nueva, a las listas del PJN, a Radicaciones, a la consulta pública, a los datos personales y a las otras aplicaciones: Escritos, DEOX, Notificaciones, IWECS, Autorizados y Mis eventos del Portal. Por causa: abrir en esta pestaña o en una nueva, libro digital y presentar escrito.</p>' +
+      '<p><b>Funciones del PJN:</b> el menú de la barra azul lleva a las listas del PJN, a Radicaciones, a la consulta pública y a las otras aplicaciones: Escritos, DEOX, Notificaciones, IWECS, Autorizados y Mis eventos del Portal. Por causa: abrir en esta pestaña o en una nueva, libro digital y presentar escrito.</p>' +
       '<h3>¿Algo dejó de funcionar?</h3>' +
-      '<p>SuPJN+ depende de cómo está armada la página del PJN. Si el PJN la cambia, algo puede dejar de funcionar. Este botón revisa, una por una y sin dejar notas ni cambiar nada, las piezas que SuPJN+ necesita (la tabla de causas, el paginador, el enlace para abrir, lo de dejar nota, Escritos, Notificaciones, DEOX, la Guía, la tabla de actuaciones y un PDF) y dice cuáles cambiaron.</p>' +
+      '<p>SuPJN+ depende de cómo está armada la página del PJN. Si el PJN la cambia, algo puede dejar de funcionar. Este botón revisa, una por una y sin dejar notas ni cambiar nada, las piezas que SuPJN+ necesita (la tabla de causas, el paginador, el enlace para abrir, lo de dejar nota, la tabla de actuaciones y un PDF) y dice cuáles cambiaron.</p>' +
       '<div class="bts"><button class="sj-b prim" data-a="diagnostico"' + (DIAG.estado === 'corriendo' ? ' disabled' : '') + '>' + (DIAG.estado === 'corriendo' ? 'Revisando...' : 'Revisar el PJN') + '</button></div>' +
       '<div data-e="diag">' + diagHTML() + '</div>' +
       '<h3>Registro de fallas de descarga</h3>' +
       '<p>Cuando una descarga no se completa, SuPJN+ anota las circunstancias: de qué expediente y de qué actuación se trata, qué respondió el servidor del PJN y cuántos intentos hicieron falta. Sirve para distinguir una actuación sin documento, que es normal, de un problema del PJN o de la conexión.</p>' +
       '<div data-e="fallas">' + fallasHTML() + '</div>' +
       '<h3>Qué no hace</h3>' +
-      '<p>No deja notas sin que lo confirmes, no presenta escritos, no cambia favoritos y no sube nada. En Escritos, Notificaciones y DEOX solo lee: no presenta, no archiva ni borra nada. Las anotaciones son notas privadas de trabajo: se llaman así para no confundirlas con dejar nota, que es el acto procesal.</p>' +
+      '<p>No deja notas sin que lo confirmes, no presenta escritos, no cambia favoritos y no sube nada. Las anotaciones son notas privadas de trabajo: se llaman así para no confundirlas con dejar nota, que es el acto procesal.</p>' +
       '<h3>Autoría y licencia</h3>' +
       '<p>Creado por <b>' + esc(APP.autor) + '</b> con Claude. <a href="mailto:' + esc(APP.mail) + '">' + esc(APP.mail) + '</a></p>' +
       '<p>Copyleft, ' + esc(APP.licencia) + '. Copyright (C) ' + esc(APP.anio) + ' ' + esc(APP.autor) + '. Software libre: se permite y se alienta su uso, copia, modificación y distribución gratuita, siempre que las obras derivadas conserven esta misma licencia. Sin garantía. ' +
@@ -5428,10 +4938,6 @@
       q('[data-e="vPanel"]').innerHTML = panelAcercaHTML();
       // Si hay una revisión en curso, que el botón vuelva a mostrarse ocupado.
       pintarDiag();
-    } else if (esVistaBandeja(VISTA)) {
-      pintarBandeja(VISTA);
-    } else if (VISTA === 'guia') {
-      pintarGuia();
     }
     pintarPastilla();
   }
@@ -5454,9 +4960,6 @@
     pintarTodo();
     const panel = q('[data-e="vPanel"]');
     if (panel) panel.scrollTop = 0;
-    // La primera vez que se entra, se consulta sola. La Guía arranca por su índice.
-    if (esVistaBandeja(v) && BAND[v].estado === 'nada') consultarBandeja(v);
-    if (v === 'guia' && GUIA.estado === 'nada') guiaInicio();
   }
 
   // ------------------------------------------------------- leer las listas
@@ -5678,1049 +5181,6 @@
     const pausa = q('[data-e="pausa"]');
     if (pausa) { CFG.pausaNota = Math.max(300, parseInt(pausa.value, 10) || 700); guardarCfg(); }
     iniciarNota(solo);
-  }
-
-  // ------------------------------- Escritos, Notificaciones, DEOX y la Guía
-  //
-  // Se leen por el puente (ver ESCRITOS, NOTIFICACIONES, DEOX Y GUÍA). Lo que
-  // se trae queda solo en memoria mientras dure la página: no se guarda nada
-  // en el equipo. Todo es de lectura: no se presenta, no se archiva ni se
-  // borra nada.
-
-  const EXT = {
-    escr: { app: 'escritos', nombre: 'Escritos', origen: 'https://escritos.pjn.gov.ar', inicio: '/info-tecnica', web: 'https://escritos.pjn.gov.ar/' },
-    notif: { app: 'notif', nombre: 'Notificaciones', origen: 'https://notif.pjn.gov.ar', inicio: '/info-tecnica', web: 'https://notif.pjn.gov.ar/' },
-    deox: { app: 'deox', nombre: 'DEOX', origen: 'https://deox.pjn.gov.ar', inicio: '/info-tecnica', web: 'https://deox.pjn.gov.ar/deox/' },
-    guia: { app: 'guia', nombre: 'Guía judicial', origen: 'https://www.pjn.gov.ar', inicio: '/guia', web: 'https://www.pjn.gov.ar/guia' }
-  };
-  const VISTA_DE_APP = { escritos: 'escr', notif: 'notif', deox: 'deox', guia: 'guia' };
-  const esVistaBandeja = (v) => v === 'escr' || v === 'notif' || v === 'deox';
-  const ESPERA_PUENTE = 30000;    // lo que puede tardar la aplicación en entrar con el SSO
-  const ESPERA_PEDIDO = 45000;    // sin noticias del puente en este lapso, el pedido se da por perdido
-  const TOPE_BANDEJA = 2000;      // elementos como máximo por consulta
-  const POR_PAGINA_BANDEJA = 50;
-  const POR_PAGINA_GUIA = 20;
-
-  // ----- el puente, del lado de la ventana
-
-  const PUENTES = {};             // por aplicación: { fr, listo, cuit, alListo, rechazar }
-  const PEDIDOS = new Map();
-  let nPedido = 0;
-
-  function cerrarPuente(app) {
-    const P = PUENTES[app];
-    delete PUENTES[app];
-    if (P) {
-      if (P.rechazar) P.rechazar(new Error('marco'));
-      if (P.fr) P.fr.remove();
-    }
-    PEDIDOS.forEach((pd, id) => {
-      if (pd.app !== app) return;
-      clearTimeout(pd.timer);
-      PEDIDOS.delete(id);
-      pd.reject(new Error('marco'));
-    });
-  }
-
-  function abrirPuente(app) {
-    if (PUENTES[app]) return PUENTES[app].listo;
-    const E = EXT[VISTA_DE_APP[app]];
-    const P = PUENTES[app] = { fr: null, cuit: '', alListo: null, rechazar: null, listo: null };
-    P.listo = new Promise((resolve, reject) => {
-      const fr = document.createElement('iframe');
-      fr.name = NOMBRE_MARCO + app;
-      fr.setAttribute('aria-hidden', 'true');
-      fr.tabIndex = -1;
-      fr.className = 'supjn-marco';
-      fr.style.cssText = 'position:fixed;left:-5000px;top:0;width:1024px;height:768px;border:0;visibility:hidden;pointer-events:none';
-      const t = setTimeout(() => {
-        P.rechazar = null;
-        if (PUENTES[app] === P) cerrarPuente(app);
-        reject(new Error('no abre'));
-      }, ESPERA_PUENTE);
-      P.alListo = () => { clearTimeout(t); P.alListo = null; P.rechazar = null; resolve(P); };
-      P.rechazar = (err) => { clearTimeout(t); P.alListo = null; P.rechazar = null; reject(err); };
-      P.fr = fr;
-      fr.src = E.origen + E.inicio;
-      document.body.appendChild(fr);
-    });
-    return P.listo;
-  }
-
-  window.addEventListener('message', (e) => {
-    const m = e.data;
-    if (!m || m.supjn !== 'puente' || typeof m.app !== 'string') return;
-    const P = PUENTES[m.app];
-    const E = EXT[VISTA_DE_APP[m.app]];
-    if (!P || !E || !P.fr || e.origin !== E.origen || e.source !== P.fr.contentWindow) return;
-    if (m.tipo === 'listo') {
-      // Si la aplicación vuelve a entrar (por ejemplo, con otra cuenta), vale la última.
-      P.cuit = String(m.cuit || '');
-      if (P.alListo) P.alListo();
-      return;
-    }
-    const pd = PEDIDOS.get(m.id);
-    if (!pd || pd.app !== m.app) return;
-    if (m.tipo === 'avance') {
-      armarEspera(m.id, pd);
-      if (pd.avance) pd.avance(m.van, m.total);
-      return;
-    }
-    if (m.tipo === 'respuesta') {
-      clearTimeout(pd.timer);
-      PEDIDOS.delete(m.id);
-      if (m.ok) pd.resolve(m.res); else pd.reject(new Error(String(m.error || 'error')));
-    }
-  });
-
-  function armarEspera(id, pd) {
-    clearTimeout(pd.timer);
-    pd.timer = setTimeout(() => { PEDIDOS.delete(id); pd.reject(new Error('sin respuesta')); }, ESPERA_PEDIDO);
-  }
-
-  function enviarPedido(app, P, datos, avance) {
-    return new Promise((resolve, reject) => {
-      const id = 'p' + (++nPedido) + '.' + Date.now().toString(36);
-      const pd = { app, resolve, reject, avance, timer: 0 };
-      PEDIDOS.set(id, pd);
-      armarEspera(id, pd);
-      try {
-        P.fr.contentWindow.postMessage(Object.assign({}, datos, { supjn: 'pedido', app, id }), EXT[VISTA_DE_APP[app]].origen);
-      } catch (e) {
-        clearTimeout(pd.timer);
-        PEDIDOS.delete(id);
-        reject(new Error('marco'));
-      }
-    });
-  }
-
-  // Los datos de dos cuentas no se mezclan: lo que responde el marco tiene que
-  // ser de la misma cuenta con la que se entró a la Consulta Web.
-  function cuentaDelPuente(app, P) {
-    if (app === 'guia') return;
-    if (!CUENTA) throw new Error('sin cuenta');
-    if (!P.cuit) throw new Error('cuenta desconocida');
-    if (P.cuit !== CUENTA) throw new Error('otra cuenta:' + P.cuit);
-  }
-
-  function errorPuente(app, e) {
-    const n = EXT[VISTA_DE_APP[app]].nombre;
-    const m = String(e && e.message ? e.message : e);
-    if (m === 'sesion') return n + ' no tiene una sesión activa. Abrilo desde Funciones del PJN (se abre en una pestaña nueva), entrá si lo pide y probá de nuevo.';
-    if (m === 'no abre' || m === 'sin respuesta' || m === 'marco') return n + ' no respondió en segundo plano. Puede que la sesión del PJN haya vencido o que el sistema esté lento: abrilo desde Funciones del PJN para comprobarlo y probá de nuevo.';
-    if (m === 'sin cuenta') return 'No se pudo identificar con qué cuenta se entró a la Consulta Web, y sin ese dato no se muestra nada de ' + n + '. Recargá la página.';
-    if (m === 'cuenta desconocida') return 'No se pudo comprobar con qué cuenta entró ' + n + ', así que no se muestra nada: los datos de dos cuentas no deben mezclarse.';
-    if (m.indexOf('otra cuenta:') === 0) return n + ' está abierto con otra cuenta (' + cuentaCorta(m.slice(12)) + ') y no con la de esta Consulta Web (' + cuentaCorta() + '). No se muestra nada: cerrá la sesión del PJN y volvé a entrar con una sola cuenta.';
-    // Un error del sistema del PJN se informa con su código; el detalle, solo
-    // si viene en castellano.
-    const sis = /^(el sistema respondió con error \d+)( \((.*)\))?$/.exec(m);
-    if (sis) return n + ': ' + sis[1] + (sis[3] && !INGLES.test(sis[3]) ? ' (' + sis[3] + ')' : '') + '.';
-    return n + ': ' + mensajeDe(e) + '.';
-  }
-
-  async function pedirPuente(app, datos, avance) {
-    // Sin la cuenta de la Consulta Web no hay con qué comparar: ni se abre el marco.
-    if (app !== 'guia' && !CUENTA) throw new Error(errorPuente(app, new Error('sin cuenta')));
-    for (let intento = 0; ; intento++) {
-      try {
-        const P = await abrirPuente(app);
-        cuentaDelPuente(app, P);
-        return await enviarPedido(app, P, datos, avance);
-      } catch (e) {
-        const m = String(e && e.message ? e.message : e);
-        // Una sesión vencida o un marco perdido se reintentan una vez, con un
-        // marco nuevo: la aplicación vuelve a entrar con el SSO.
-        if (intento === 0 && /^(sesion|marco|sin respuesta)$/.test(m)) { cerrarPuente(app); continue; }
-        throw new Error(errorPuente(app, e));
-      }
-    }
-  }
-
-  // ----- datos comunes
-
-  // Las otras aplicaciones piden la cámara por su número interno, que se lee
-  // de cada una la primera vez.
-  const CAMARAS = {};
-  async function numeroCamara(app, sigla) {
-    if (!CAMARAS[app]) {
-      const lista = await pedirPuente(app, { op: 'json', ruta: '/api/camaras' });
-      const m = {};
-      (Array.isArray(lista) ? lista : []).forEach((c) => { if (c && c.codigo != null && c.id != null) m[String(c.codigo).toUpperCase()] = c.id; });
-      if (!Object.keys(m).length) throw new Error(EXT[VISTA_DE_APP[app]].nombre + ' no informó la lista de cámaras');
-      CAMARAS[app] = m;
-    }
-    const n = CAMARAS[app][sigla];
-    if (n == null) throw new Error(EXT[VISTA_DE_APP[app]].nombre + ' no reconoce la cámara ' + sigla);
-    return n;
-  }
-
-  // "CCC 046311/2025/TO01" -> { sigla: 'CCC', num: 46311, anio: 2025 }
-  function partesExp(exp) {
-    const m = /^([A-Z]{2,4})\s+0*(\d+)\/(\d{4})/.exec(clave(exp));
-    return m ? { sigla: m[1], num: parseInt(m[2], 10), anio: parseInt(m[3], 10) } : null;
-  }
-
-  // La Consulta Web escribe el número con ceros adelante y las otras
-  // aplicaciones sin ellos: para compararlos, se los saca.
-  const expComparable = (exp) => clave(exp).replace(/^([A-Z]{2,4})\s+0*(\d)/, '$1 $2');
-  const COMPARABLES = { rel: null, fav: null, mapa: null };
-  function claveEnListas(exp) {
-    if (!exp) return '';
-    if (COMPARABLES.rel !== INDICE.rel || COMPARABLES.fav !== INDICE.fav || !COMPARABLES.mapa) {
-      const mapa = new Map();
-      ['rel', 'fav'].forEach((t) => INDICE[t].forEach((c, k) => { const x = expComparable(k); if (!mapa.has(x)) mapa.set(x, k); }));
-      Object.assign(COMPARABLES, { rel: INDICE.rel, fav: INDICE.fav, mapa });
-    }
-    return COMPARABLES.mapa.get(expComparable(exp)) || '';
-  }
-
-  const fechaAPI = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); return m ? m[3] + m[2] + m[1] : ''; };
-  // "2026-09-15T11:58:07.000-0300": el huso sin dos puntos no lo entienden
-  // todos los navegadores.
-  const msDe = (t) => {
-    if (!t) return 0;
-    const n = Date.parse(String(t).replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));
-    return isNaN(n) ? 0 : n;
-  };
-  const isoHace = (dias) => {
-    const d = new Date();
-    d.setDate(d.getDate() - dias);
-    return d.getFullYear() + '-' + dos(d.getMonth() + 1) + '-' + dos(d.getDate());
-  };
-  const isoDeMs = (ms) => { const d = new Date(ms); return d.getFullYear() + '-' + dos(d.getMonth() + 1) + '-' + dos(d.getDate()); };
-  const textoBusq = (...xs) => norm(xs.filter((x) => x != null && x !== '').join(' '));
-  const expArchivo = (exp) => clave(exp).replace(/[\s/]+/g, '-') || 'sin-expediente';
-  const urlExpediente = (eid) => ORIGEN_SCW + '/scw/consultaNovedad.seam?identificacion=' + encodeURIComponent(CUENTA) + '&eid=' + encodeURIComponent(eid);
-
-  // ----- las tres bandejas
-
-  // Los nombres, como los muestra cada aplicación del PJN.
-  const ESTADO_ESCRITO = {
-    ENVIADO_A_DEPENDENCIA: 'En dependencia', ENVIADO_ARCHIVADO: 'Archivado', ENVIADO_BORRADO: 'Borrado',
-    ENVIADO_GESTIONADO: 'Gestionado', PENDIENTE: 'Pendiente', ENVIADO_A_AUTORIZADOR: 'Enviado a autorizador', DESCONOCIDO: 'Desconocido'
-  };
-  const DEOX_ART_400 = 4;
-  const DEOX_OFICIO_3003 = 6;
-  const TIPO_DEOX = { 2: 'DEOX', 3: 'Autónomo', 4: 'Artículo 400', 6: 'Oficio 3003' };
-
-  function tipoDeox(x) {
-    if (x.idDeoExpOrigen) return 'Responde a DEO N° ' + x.idDeoExpOrigen;
-    return TIPO_DEOX[x.idTipoDeo] || 'Oficio';
-  }
-  function destinoDeox(x) {
-    if (x.idTipoDeo !== DEOX_ART_400 && x.idTipoDeo !== DEOX_OFICIO_3003) return limpio(x.oficinaDestino && x.oficinaDestino.descripcion);
-    return limpio(x.cuio ? x.descripcionOrganismo : (x.oficinaDeox && x.oficinaDeox.descripcion));
-  }
-  // La misma regla que usa DEOX para su columna Estado.
-  function estadoDeox(x) {
-    if (x.cerrado && x.fechaDesestimado) return 'Cerrado';
-    if (x.fechaRespuesta && x.cerrado && !x.fechaDesestimado) return 'Incorporado';
-    if (x.fechaRespuesta && !x.cerrado) return 'Respondido';
-    if (x.fechaEnvio && (x.cuio || x.oficinaDeox) && x.cuioOrigen && !x.esRespuesta && !x.fechaRespuesta && !x.cerrado) return 'Enviado';
-    return '';
-  }
-
-  function filaEscrito(x, bandeja) {
-    if (!x || x.id == null) return null;
-    const ex = x.expediente || {};
-    const exp = limpio(ex.numeracion);
-    const dep = limpio((x.oficina && x.oficina.descripcion) || ex.oficina);
-    const estado = ESTADO_ESCRITO[x.estado] || limpio(String(x.estado || '').replace(/_/g, ' ').toLowerCase());
-    return {
-      id: String(x.id), bandeja, fecha: msDe(x.fechaIngreso || x.fechaEnvioJuzgado), exp, eid: ex.id, car: limpio(ex.caratula), dep,
-      desc: limpio(x.descripcion), tipo: limpio(x.tipo), fojas: x.fojas, archivo: limpio(x.nombreArchivo), estado,
-      acep: msDe(x.fechaAcepJuzgado),
-      busq: textoBusq(exp, ex.caratula, dep, x.descripcion, x.tipo, estado, x.nombreArchivo, x.nombreAutor)
-    };
-  }
-
-  function filaNotif(x, bandeja) {
-    if (!x || x.id == null) return null;
-    const ex = x.expediente || {};
-    const exp = limpio(ex.numeracion);
-    const emisor = limpio(x.nombreAutor || (x.oficina && x.oficina.descripcion));
-    const dest = (Array.isArray(x.destinatarios) ? x.destinatarios : []).map((d) => limpio(d && d.nombre)).filter(Boolean).join(' / ');
-    const num = x.numeroCedula != null ? String(x.numeroCedula) : '';
-    return {
-      id: String(x.id), bandeja, fecha: msDe(x.fecha), num, exp, eid: ex.id, car: limpio(ex.caratula), dep: limpio(ex.oficina), emisor, dest,
-      busq: textoBusq(num, exp, ex.caratula, ex.oficina, emisor, dest)
-    };
-  }
-
-  function filaDeox(x, bandeja) {
-    if (!x || x.id == null) return null;
-    const ex = x.expedienteOrigen || x.expedienteRespuesta || {};
-    const exp = limpio(ex.numeracion);
-    const tipo = tipoDeox(x), destino = destinoDeox(x), estado = estadoDeox(x);
-    const dep = limpio(x.oficinaDestino && x.oficinaDestino.descripcion);
-    return {
-      id: String(x.id), bandeja, fecha: msDe(x.fechaEnvio || x.fechaGeneracion), num: String(x.id), exp, eid: ex.id, car: limpio(ex.caratula),
-      tipo, destino, dep, estado, resp: msDe(x.fechaRespuesta), motivo: limpio(x.motivo), urgente: !!x.urgente,
-      busq: textoBusq(x.id, exp, ex.caratula, tipo, destino, dep, estado, x.motivo)
-    };
-  }
-
-  const BANDEJAS = {
-    escr: {
-      ruta: '/api/escritos', dias: 60, unidad: ['escrito', 'escritos'], fila: filaEscrito,
-      opciones: [['ENVIADOS_A_DEPENDENCIA', 'Enviados a dependencia'], ['ENVIADOS_A_AUTORIZADOR', 'Enviados a autorizador'], ['ARCHIVADOS', 'Archivados']],
-      cols: [{ k: 'fecha', t: 'Fecha', w: 12 }, { k: 'exp', t: 'Expediente', w: 27 }, { k: 'desc', t: 'Escrito', w: 24 }, { k: 'dep', t: 'Dependencia', w: 18 }, { k: 'estado', t: 'Estado', w: 11 }],
-      pdf: (f) => '/api/escritos/' + f.id + '/pdf',
-      archivo: (f) => 'Escrito-' + expArchivo(f.exp) + '-' + (f.fecha ? isoDeMs(f.fecha) : 'sin-fecha') + '-' + f.id + '.pdf'
-    },
-    notif: {
-      ruta: '/api/notificaciones', dias: 30, unidad: ['notificación', 'notificaciones'], fila: filaNotif,
-      opciones: [['RECIBIDAS', 'Recibidas'], ['ENVIADAS_A_DESTINATARIO', 'Enviadas']],
-      cols: [{ k: 'fecha', t: 'Fecha', w: 12 }, { k: 'num', t: 'Cédula', w: 11 }, { k: 'exp', t: 'Expediente', w: 33 }, { k: 'emisor', t: 'Emisor', w: 22 }, { k: 'dest', t: 'Destinatarios', w: 15 }],
-      pdf: (f) => '/api/notificaciones/' + f.bandeja + '/' + f.id + '/pdf',
-      archivo: (f) => 'Cedula-' + (f.num || f.id) + '-' + expArchivo(f.exp) + '.pdf'
-    },
-    deox: {
-      // Los DEOX son pocos: de manera predeterminada, el último año. La bandeja
-      // "enviados a dependencia" es de los organismos, no de los letrados.
-      ruta: '/api/deox', dias: 365, unidad: ['oficio', 'oficios'], fila: filaDeox,
-      opciones: [['ENVIADOS_A_ORGANISMO', 'Enviados']],
-      cols: [{ k: 'fecha', t: 'Envío', w: 12 }, { k: 'num', t: 'Nro.', w: 9 }, { k: 'tipo', t: 'Tipo y motivo', w: 22 }, { k: 'exp', t: 'Expediente', w: 23 }, { k: 'destino', t: 'Destino', w: 16 }, { k: 'estado', t: 'Estado', w: 11 }],
-      pdf: (f) => '/api/deox/' + f.bandeja + '/' + f.id + '/pdf',
-      archivo: (f) => 'DEOX-' + f.id + '-' + expArchivo(f.exp) + '.pdf'
-    }
-  };
-
-  const BAND = {};
-  Object.keys(BANDEJAS).forEach((v) => {
-    BAND[v] = {
-      bandeja: BANDEJAS[v].opciones[0][0], desde: isoHace(BANDEJAS[v].dias), hasta: hoyISO(), texto: '', causa: null,
-      estado: 'nada', txt: '', filas: [], total: 0, leidas: 0, fecha: 0, rango: '', orden: { col: 'fecha', desc: true }, pagina: 1, gen: 0
-    };
-  });
-
-  async function consultarBandeja(v) {
-    const B = BAND[v], D = BANDEJAS[v], E = EXT[v];
-    const gen = ++B.gen;
-    B.estado = 'leyendo';
-    B.txt = 'Consultando ' + E.nombre + '...';
-    pintarBandeja(v);
-    pintarSolapas();
-    try {
-      const bandeja = B.bandeja;
-      let ruta = D.ruta + '?bandeja=' + bandeja;
-      let rango;
-      if (B.causa) {
-        const cam = await numeroCamara(E.app, B.causa.sigla);
-        ruta += '&camaraExpediente=' + cam + '&anioExpediente=' + B.causa.anio + '&numeroExpediente=' + B.causa.num;
-        rango = 'de ' + B.causa.exp + ', de cualquier fecha';
-      } else {
-        const d = fechaAPI(B.desde), h = fechaAPI(B.hasta);
-        if (!d || !h) throw new Error('Poné las dos fechas, desde y hasta');
-        if (B.desde > B.hasta) throw new Error('La fecha "desde" es posterior a la fecha "hasta"');
-        ruta += '&fechaDesde=' + d + '&fechaHasta=' + h;
-        rango = 'del ' + fechaPareja(isoACorta(B.desde) + '/' + B.desde.slice(0, 4)) + ' al ' + fechaPareja(isoACorta(B.hasta) + '/' + B.hasta.slice(0, 4));
-      }
-      const r = await pedirPuente(E.app, { op: 'lista', ruta, tope: TOPE_BANDEJA }, (van, total) => {
-        if (gen !== B.gen) return;
-        B.txt = 'Leyendo ' + E.nombre + ': ' + van + (total != null ? ' de ' + total : '') + '...';
-        pintarEstadoBandeja(v);
-      });
-      if (gen !== B.gen) return;
-      const items = r && Array.isArray(r.items) ? r.items : [];
-      B.filas = items.map((x) => D.fila(x, bandeja)).filter(Boolean);
-      B.total = typeof r.total === 'number' ? r.total : items.length;
-      B.leidas = items.length;
-      B.fecha = Date.now();
-      B.rango = rango;
-      B.estado = 'listo';
-      B.pagina = 1;
-      B.txt = '';
-    } catch (e) {
-      if (gen !== B.gen) return;
-      B.estado = 'error';
-      B.txt = mensajeDe(e);
-    }
-    pintarBandeja(v);
-    pintarSolapas();
-  }
-
-  // Desde una causa: la bandeja, solo con lo de esa causa y de cualquier fecha.
-  function bandejaDeCausa(v, k) {
-    const px = partesExp(k);
-    if (!px) { avisar('No se reconoce el número de expediente ' + k + '.', true); return; }
-    const B = BAND[v];
-    B.causa = { exp: clave(k), sigla: px.sigla, num: px.num, anio: px.anio };
-    B.texto = '';
-    B.estado = 'nada';
-    B.filas = [];
-    irAVista(v);
-  }
-
-  function valorBandeja(f, k) {
-    if (k === 'fecha') return f.fecha || 0;
-    if (k === 'exp') return ordenExp(f.exp);
-    if (k === 'num') return parseInt(f.num, 10) || 0;
-    return norm(f[k]);
-  }
-
-  function filasBandeja(v) {
-    const B = BAND[v];
-    const n = norm(B.texto);
-    const L = n ? B.filas.filter((f) => f.busq.indexOf(n) >= 0) : B.filas.slice();
-    const { col, desc } = B.orden;
-    L.sort((a, b) => {
-      const x = valorBandeja(a, col), y = valorBandeja(b, col);
-      let c = x < y ? -1 : x > y ? 1 : 0;
-      if (desc) c = -c;
-      return c || (b.fecha - a.fecha);
-    });
-    return L;
-  }
-
-  function ordenarBandeja(v, k) {
-    const B = BAND[v];
-    B.orden = B.orden.col === k ? { col: k, desc: !B.orden.desc } : { col: k, desc: k === 'fecha' };
-    B.pagina = 1;
-    pintarCuerpoBandeja(v);
-  }
-
-  function expCeldaHTML(f) {
-    const k = claveEnListas(f.exp);
-    return '<span class="sj-exp">' + esc(f.exp || '(sin expediente)') + '</span>' +
-      (k ? ' ' + chipsDe(k) : '') +
-      (f.car ? '<div class="sj-car">' + esc(f.car) + '</div>' : '');
-  }
-
-  // Una dependencia se puede buscar en la Guía con un clic. Solo lo que parece
-  // una dependencia: en Enviadas, el emisor es el propio letrado.
-  const RE_DEPENDENCIA = /juzgado|c[aá]mara|tribunal|sala|secretar|corte|oficina|fiscal|defensor|registro|archivo/i;
-  const depGuiaHTML = (dep, sub) => (dep && RE_DEPENDENCIA.test(dep)
-    ? '<button class="sj-vinculo" data-a="guiaDep" data-dep="' + esc(dep) + '" title="Ver sus datos en la Guía judicial">' + esc(dep) + '</button>' + (sub || '')
-    : esc(dep || '') + (sub || ''));
-
-  function celdaBandejaHTML(v, f, k) {
-    if (k === 'fecha') return f.fecha ? '<span class="sj-exp">' + esc(fechaHora(f.fecha)) + '</span>' : '';
-    // En las notificaciones, el juzgado de radicación va con el expediente.
-    if (k === 'exp') return expCeldaHTML(f) + (v === 'notif' && f.dep && norm(f.dep) !== norm(f.emisor) ? '<div class="sj-sub">' + depGuiaHTML(f.dep) + '</div>' : '');
-    if (k === 'num') return '<span class="sj-exp">' + esc(f.num) + '</span>';
-    if (v === 'escr' && k === 'desc') {
-      const sub = [f.tipo && f.tipo !== 'ESCRITO' ? f.tipo : '', f.fojas ? plural(f.fojas, 'foja', 'fojas') : '', f.archivo].filter(Boolean).join(' · ');
-      return esc(f.desc) + (sub ? '<div class="sj-sub">' + esc(sub) + '</div>' : '');
-    }
-    if (v === 'escr' && k === 'dep') return depGuiaHTML(f.dep);
-    if (v === 'escr' && k === 'estado') return esc(f.estado) + (f.acep ? '<div class="sj-sub">aceptado ' + esc(fechaHora(f.acep)) + '</div>' : '');
-    if (v === 'notif' && k === 'emisor') return depGuiaHTML(f.emisor);
-    if (v === 'deox' && k === 'tipo') {
-      return esc(f.tipo) + (f.urgente ? '<span class="sj-urg">urgente</span>' : '') +
-        (f.motivo ? '<div class="sj-nota-txt sj-sub" title="' + esc(f.motivo) + '">' + esc(f.motivo) + '</div>' : '');
-    }
-    if (v === 'deox' && k === 'destino') {
-      return esc(f.destino) + (f.dep && norm(f.dep) !== norm(f.destino) ? '<div class="sj-sub">' + depGuiaHTML(f.dep) + '</div>' : '');
-    }
-    if (v === 'deox' && k === 'estado') return esc(f.estado) + (f.resp ? '<div class="sj-sub">respondido ' + esc(fechaHora(f.resp)) + '</div>' : '');
-    return esc(f[k]);
-  }
-
-  function tablaBandejaHTML(v, L) {
-    const B = BAND[v], D = BANDEJAS[v], E = EXT[v];
-    if (B.estado === 'nada') return '<p class="sj-vacio">Elegí la bandeja y las fechas, y pulsá Consultar.</p>';
-    if (B.estado !== 'listo') return '<p class="sj-vacio">' + esc(B.estado === 'leyendo' ? 'Consultando ' + E.nombre + '...' : 'No hay nada para mostrar.') + '</p>';
-    if (!L.length) {
-      return '<p class="sj-vacio">' + esc(B.filas.length
-        ? 'Ningún elemento coincide con la búsqueda.'
-        : 'El PJN no tiene ' + D.unidad[1] + ' en esta bandeja ' + B.rango + '.') + '</p>';
-    }
-    const ini = (B.pagina - 1) * POR_PAGINA_BANDEJA;
-    const pag = L.slice(ini, ini + POR_PAGINA_BANDEJA);
-    const cols = D.cols;
-    return '<table class="sj-t sj-tb"><colgroup>' + cols.map((c) => '<col style="width:' + c.w + '%">').join('') + '<col style="width:146px"></colgroup><thead><tr>' +
-      cols.map((c) => '<th data-bo="' + c.k + '" data-v="' + v + '" class="' + (B.orden.col === c.k ? 'act' : '') + '" title="Ordenar por ' + esc(c.t.toLowerCase()) + '">' +
-        '<span class="tt">' + esc(c.t) + '</span><span class="fl">' + (B.orden.col === c.k ? (B.orden.desc ? '▼' : '▲') : '↕') + '</span></th>').join('') +
-      '<th class="fija"></th></tr></thead><tbody>' +
-      pag.map((f) => '<tr>' + cols.map((c) => '<td>' + celdaBandejaHTML(v, f, c.k) + '</td>').join('') +
-        '<td class="acc"><div class="sj-acc">' +
-        '<button class="sj-abrir" data-a="bandVer" data-v="' + v + '" data-id="' + esc(f.id) + '" title="Ver el PDF en una pestaña nueva">Ver</button>' +
-        '<button class="sj-mas" data-a="bandBajar" data-v="' + v + '" data-id="' + esc(f.id) + '" title="Descargar el PDF">⇩</button>' +
-        (f.exp && partesExp(f.exp) ? '<button class="sj-mas" data-a="cedulaUna" data-k="' + esc(f.exp) + '" title="Dejar cédula en esta causa (Notificaciones, pestaña nueva)">✉</button>' : '') +
-        (f.eid != null && CUENTA ? '<a class="sj-mas" href="' + esc(urlExpediente(f.eid)) + '" target="_blank" rel="noopener" title="Abrir el expediente en la Consulta Web, en una pestaña nueva">↗</a>' : '') +
-        '</div></td></tr>').join('') +
-      '</tbody></table>';
-  }
-
-  function estadoBandejaHTML(v, L) {
-    const B = BAND[v], D = BANDEJAS[v];
-    if (B.estado === 'leyendo') return '<span class="txt">' + esc(B.txt) + '</span><div class="sj-prog" style="flex:1 1 100%"><i style="width:35%"></i></div>';
-    if (B.estado === 'error') return '<span class="txt" style="color:#b3261e">' + esc(B.txt) + '</span>';
-    if (B.estado !== 'listo') return '<span class="txt">' + esc(B.causa ? 'Se van a consultar los ' + D.unidad[1] + ' de ' + B.causa.exp + '.' : 'Elegí la bandeja y las fechas, y pulsá Consultar.') + '</span>';
-    const partes = [
-      (B.texto ? L.length + ' de ' : '') + plural(B.filas.length, D.unidad[0], D.unidad[1]) + ' ' + B.rango,
-      'leído ' + hace(B.fecha)
-    ];
-    let h = '<span class="txt">' + esc(partes.join(' · ')) + '</span>';
-    if (B.total > B.leidas) {
-      h += '<span class="txt" style="color:#b3261e">El PJN informa ' + B.total + ' y se leyeron los primeros ' + B.leidas + ' que manda: acotá las fechas para ver el resto.</span>';
-    }
-    return h;
-  }
-
-  function pieBandejaHTML(v, L) {
-    const B = BAND[v];
-    if (B.estado !== 'listo' || !L.length) return '';
-    const P = POR_PAGINA_BANDEJA;
-    const pags = Math.max(1, Math.ceil(L.length / P));
-    const ini = (B.pagina - 1) * P;
-    let h = '<span>Mostrando ' + (ini + 1) + ' a ' + Math.min(L.length, ini + P) + ' de ' + L.length + '</span>';
-    if (pags > 1) {
-      const bt = (p, t, act, dis) => '<button data-bpag="' + p + '" data-v="' + v + '"' + (act ? ' class="act"' : '') + (dis ? ' disabled' : '') + '>' + t + '</button>';
-      let nums = '';
-      for (let p = Math.max(1, B.pagina - 2); p <= Math.min(pags, B.pagina + 2); p++) nums += bt(p, String(p), p === B.pagina, false);
-      h += '<span class="der">' + bt(1, '«', false, B.pagina === 1) + bt(B.pagina - 1, '‹', false, B.pagina === 1) + nums +
-        bt(B.pagina + 1, '›', false, B.pagina === pags) + bt(pags, '»', false, B.pagina === pags) + '</span>';
-    }
-    return h;
-  }
-
-  function panelBandejaHTML(v, L) {
-    const B = BAND[v], D = BANDEJAS[v], E = EXT[v];
-    return '<div class="sj-bandeja" data-band="' + v + '">' +
-      '<div class="sj-barra">' +
-      '<select data-bf="bandeja" title="Bandeja">' + D.opciones.map(([k, t]) => '<option value="' + k + '"' + (k === B.bandeja ? ' selected' : '') + '>' + esc(t) + '</option>').join('') + '</select>' +
-      (B.causa
-        ? '<span class="sj-causa" title="Solo los de esta causa, de cualquier fecha (con sus incidentes)">Causa ' + esc(B.causa.exp) +
-          '<button data-a="bandSinCausa" data-v="' + v + '" title="Quitar el filtro de la causa y volver a las fechas">×</button></span>'
-        : '<label>Desde <input type="date" data-bf="desde" value="' + esc(B.desde) + '"></label>' +
-          '<label>hasta <input type="date" data-bf="hasta" value="' + esc(B.hasta) + '"></label>') +
-      '<button class="sj-b prim" data-a="bandConsultar" data-v="' + v + '"' + (B.estado === 'leyendo' ? ' disabled' : '') + '>Consultar</button>' +
-      '<input type="text" data-bf="texto" placeholder="Buscar en lo consultado" value="' + esc(B.texto) + '">' +
-      '<span class="der">' +
-      (v === 'notif' ? '<button class="sj-b prim" data-a="cedulaUna" data-k="' + esc(B.causa ? B.causa.exp : '') + '" title="' +
-        (B.causa ? 'Abre Notificaciones en una pestaña nueva, con esta causa cargada' : 'Abre el formulario de Notificaciones en una pestaña nueva') + '">' +
-        (B.causa ? 'Dejar cédula en esta causa' : 'Nueva cédula') + ' ↗</button>' : '') +
-      '<a class="sj-b" href="' + esc(E.web) + '" target="_blank" rel="noopener noreferrer" title="Abrir ' + esc(E.nombre) + ' del PJN en una pestaña nueva">' + esc(E.nombre) + ' en el PJN ↗</a></span>' +
-      '</div>' +
-      '<div class="sj-est" data-e="bandEstado">' + estadoBandejaHTML(v, L) + '</div>' +
-      '<div class="sj-cuerpo" data-e="bandCuerpo">' + tablaBandejaHTML(v, L) + '</div>' +
-      '<div class="sj-pie" data-e="bandPie">' + pieBandejaHTML(v, L) + '</div>' +
-      '</div>';
-  }
-
-  function paginaValida(v, L) {
-    const B = BAND[v];
-    const pags = Math.max(1, Math.ceil(L.length / POR_PAGINA_BANDEJA));
-    if (!(B.pagina >= 1)) B.pagina = 1;
-    if (B.pagina > pags) B.pagina = pags;
-  }
-
-  function pintarBandeja(v) {
-    if (VISTA !== v || !win) return;
-    const p = q('[data-e="vPanel"]');
-    if (!p) return;
-    const L = filasBandeja(v);
-    paginaValida(v, L);
-    const act = document.activeElement;
-    const campo = act && act.dataset && act.dataset.bf === 'texto' && p.contains(act) ? act.selectionStart : null;
-    p.innerHTML = panelBandejaHTML(v, L);
-    if (campo != null) {
-      const n = p.querySelector('[data-bf="texto"]');
-      if (n) { n.focus(); try { n.setSelectionRange(campo, campo); } catch (x) { /* sin selección */ } }
-    }
-  }
-
-  function pintarEstadoBandeja(v) {
-    if (VISTA !== v || !win) return;
-    const e = q('[data-e="bandEstado"]');
-    if (e) e.innerHTML = estadoBandejaHTML(v, filasBandeja(v));
-  }
-
-  // Al filtrar o cambiar de página se redibuja la tabla y no la barra: así el
-  // buscador no pierde el foco.
-  function pintarCuerpoBandeja(v) {
-    if (VISTA !== v || !win) return;
-    const L = filasBandeja(v);
-    paginaValida(v, L);
-    const c = q('[data-e="bandCuerpo"]'), e = q('[data-e="bandEstado"]'), pie = q('[data-e="bandPie"]');
-    if (!c) { pintarBandeja(v); return; }
-    c.innerHTML = tablaBandejaHTML(v, L);
-    if (e) e.innerHTML = estadoBandejaHTML(v, L);
-    if (pie) pie.innerHTML = pieBandejaHTML(v, L);
-  }
-
-  // El PDF se trae por el puente. Para verlo se abre la pestaña antes de
-  // pedirlo, porque Chrome bloquea las que se abren después de esperar.
-  async function pdfBandeja(v, id, bajar) {
-    const B = BAND[v], D = BANDEJAS[v], E = EXT[v];
-    const f = B.filas.find((x) => x.id === String(id));
-    if (!f) return;
-    const w = bajar ? null : pestanaNueva('_blank', 'el PDF');
-    if (!bajar && !w) return;
-    avisar('Trayendo el PDF de ' + E.nombre + '...');
-    try {
-      const r = await pedirPuente(E.app, { op: 'pdf', ruta: D.pdf(f) });
-      if (!r || !r.buf || typeof r.buf.byteLength !== 'number') throw new Error('no llegó el PDF');
-      if (bajar) {
-        guardarArchivo(r.buf, D.archivo(f));
-        avisar('PDF descargado: ' + D.archivo(f) + '.');
-        return;
-      }
-      // El blob no se suelta mientras dure la página: la pestaña lo sigue usando
-      // si se la recarga o se guarda el PDF desde el visor.
-      const url = URL.createObjectURL(new Blob([r.buf], { type: 'application/pdf' }));
-      listaPestana(w);
-      w.location.replace(url);
-      avisar('');
-    } catch (e) {
-      cerrarPestana(w);
-      avisar('No se pudo traer el PDF. ' + mensajeDe(e), true);
-    }
-  }
-
-  // ----- la Guía judicial
-
-  const GUIA = { modo: 'dep', texto: '', estado: 'nada', txt: '', vista: '', det: null, res: null, pila: [], resaltar: null, nota: '', gen: 0 };
-  const guiaWeb = (cod) => EXT.guia.web + (cod && cod !== 'guia-inicio' ? '/' + encodeURIComponent(cod) : '');
-  const rutaGuia = (cod) => '/api/dependencia/codigo/' + encodeURIComponent(cod);
-
-  // Palabras que no sirven para buscar: la Guía escribe "Juzgado Criminal y
-  // Correccional Nro. 11" donde las otras aplicaciones dicen "Juzgado Nacional
-  // en lo Criminal y Correccional Nro. 11". La búsqueda del sitio no distingue
-  // acentos y busca cada palabra por separado.
-  const VACIAS_GUIA = new Set(['nacional', 'nacionales', 'en', 'lo', 'la', 'las', 'los', 'el', 'de', 'del', 'y', 'e', 'a',
-    'nro', 'n', 'no', 'num', 'numero', 'capital', 'cap', 'primera', 'instancia', 'cargo', 'ciudad', 'autonoma', 'buenos', 'aires', 'caba']);
-  const ROMANOS = { i: 1, ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7, viii: 8, ix: 9, x: 10, xi: 11, xii: 12, xiii: 13, xiv: 14, xv: 15, xvi: 16 };
-
-  // Palabras y números de un nombre. Después de "sala" o "vocalía", un número
-  // romano vale como número: la Guía escribe "Sala V" y los expedientes "SALA 5".
-  function tokensGuia(txt) {
-    const pal = norm(txt).replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(Boolean);
-    const palabras = [], numeros = [];
-    pal.forEach((w, i) => {
-      if (/^\d+$/.test(w)) { numeros.push(parseInt(w, 10)); return; }
-      const trasSala = i > 0 && /^(sala|vocalia)$/.test(pal[i - 1]);
-      if (trasSala && ROMANOS[w]) { numeros.push(ROMANOS[w]); return; }
-      // "Sala A", "Sala E": ahí la letra es el nombre de la sala y no se descarta.
-      if (trasSala && w.length === 1) { palabras.push(w); return; }
-      if (VACIAS_GUIA.has(w)) return;
-      // "de la Capital Federal": la Guía escribe "Cap.Federal", y su búsqueda no
-      // encuentra "federal" dentro de esa palabra. Ahí no se lo usa.
-      if (w === 'federal' && i > 0 && /^(capital|cap)$/.test(pal[i - 1])) return;
-      palabras.push(w);
-    });
-    return { palabras, numeros };
-  }
-
-  // -1 si el candidato no corresponde; si corresponde, cuántas palabras le
-  // sobran (cuantas menos, mejor). Los números tienen que ser los mismos.
-  function puntajeGuia(q, nombre) {
-    const c = tokensGuia(nombre);
-    if (q.numeros.join(',') !== c.numeros.join(',')) return -1;
-    if (q.palabras.some((w) => !c.palabras.some((x) => x.indexOf(w) === 0))) return -1;
-    return c.palabras.filter((x) => !q.palabras.some((w) => x.indexOf(w) === 0)).length;
-  }
-
-  // El mejor, solo si es uno: con un empate no se adivina.
-  function mejorGuia(q, lista) {
-    const v = (lista || [])
-      .map((s) => ({ s, p: puntajeGuia(q, s && s.dependenciaInfo ? s.dependenciaInfo.nombre : '') }))
-      .filter((x) => x.p >= 0)
-      .sort((a, b) => a.p - b.p);
-    if (!v.length) return { unico: null, validos: [] };
-    return { unico: (v.length === 1 || v[0].p < v[1].p) ? v[0].s : null, validos: v.map((x) => x.s) };
-  }
-
-  const cuerpoGuia = (texto, pagina, tam) => ({ nombre: texto, tipo: 0, idParent: 0, page: pagina || 0, size: tam || POR_PAGINA_GUIA });
-
-  function apilarGuia() {
-    if (GUIA.vista === 'det' && GUIA.det) GUIA.pila.push({ cod: GUIA.det.dependencia.codigoUrl });
-    else if (GUIA.vista === 'res' && GUIA.res) GUIA.pila.push({ res: true });
-  }
-
-  async function guiaAbrir(cod, apilar, resaltar) {
-    if (!cod) return;
-    const gen = ++GUIA.gen;
-    GUIA.estado = 'leyendo';
-    GUIA.txt = 'Consultando la Guía judicial...';
-    pintarGuia();
-    try {
-      const d = await pedirPuente('guia', { op: 'json', ruta: rutaGuia(cod) });
-      if (gen !== GUIA.gen) return;
-      if (!d || !d.dependencia || !d.dependencia.dependenciaInfo) throw new Error('la Guía no tiene datos de esa dependencia');
-      if (apilar) apilarGuia();
-      GUIA.det = d;
-      GUIA.vista = 'det';
-      GUIA.resaltar = resaltar == null ? null : resaltar;
-      GUIA.estado = 'listo';
-      GUIA.txt = '';
-    } catch (e) {
-      if (gen !== GUIA.gen) return;
-      GUIA.estado = 'error';
-      GUIA.txt = mensajeDe(e);
-    }
-    pintarGuia();
-  }
-
-  function guiaVolver() {
-    const x = GUIA.pila.pop();
-    if (!x) return;
-    GUIA.nota = '';
-    if (x.res) {
-      GUIA.vista = 'res';
-      GUIA.estado = 'listo';
-      GUIA.txt = '';
-      pintarGuia();
-      return;
-    }
-    guiaAbrir(x.cod, false);
-  }
-
-  function guiaInicio() {
-    GUIA.pila = [];
-    GUIA.res = null;
-    GUIA.nota = '';
-    guiaAbrir('guia-inicio', false);
-  }
-
-  // Con "pagina" se pasa de página en los resultados que están a la vista, con
-  // su texto y su tipo, aunque en el buscador ya se haya escrito otra cosa.
-  async function guiaBuscar(pagina) {
-    const paginar = pagina != null && GUIA.res && GUIA.vista === 'res';
-    const t = paginar ? GUIA.res.texto : limpio(GUIA.texto);
-    if (t.length < 3) {
-      GUIA.estado = 'error';
-      GUIA.txt = 'Escribí al menos 3 letras para buscar.';
-      pintarGuia();
-      return;
-    }
-    const gen = ++GUIA.gen;
-    GUIA.estado = 'leyendo';
-    GUIA.txt = 'Buscando "' + t + '" en la Guía judicial...';
-    pintarGuia();
-    try {
-      const modo = paginar ? GUIA.res.modo : GUIA.modo;
-      const r = await pedirPuente('guia', { op: 'buscar', ruta: modo === 'per' ? '/api/persona/find' : '/api/dependencia/find', cuerpo: cuerpoGuia(t, pagina || 0) });
-      if (gen !== GUIA.gen) return;
-      GUIA.res = {
-        modo, texto: t, lista: Array.isArray(r && r.content) ? r.content : [],
-        total: (r && r.totalElements) || 0, pagina: (r && r.number) || 0, paginas: (r && r.totalPages) || 0, nota: ''
-      };
-      GUIA.vista = 'res';
-      GUIA.pila = [];
-      GUIA.nota = '';
-      GUIA.estado = 'listo';
-      GUIA.txt = '';
-    } catch (e) {
-      if (gen !== GUIA.gen) return;
-      GUIA.estado = 'error';
-      GUIA.txt = mensajeDe(e);
-    }
-    pintarGuia();
-  }
-
-  // Busca, entre las dependencias que cuelgan de d, la que nombra el
-  // expediente después del guion ("SECRETARÍA NRO. 133", "SALA 5"). Mira
-  // también un nivel más abajo, porque las cámaras agrupan las salas.
-  async function subGuia(d, q, gen) {
-    const subs = (d && d.subDependencias) || [];
-    const directa = mejorGuia(q, subs).unico;
-    if (directa) return { directa: true, sub: directa };
-    // Los juzgados con una sola secretaría la tienen en la Guía como "Secretaría
-    // Única", sin número: si es la única de su clase, es esa.
-    const clase = subs.filter((s) => s && s.dependenciaInfo &&
-      tokensGuia(s.dependenciaInfo.nombre).palabras.some((x) => q.palabras.length && x.indexOf(q.palabras[0]) === 0));
-    if (clase.length === 1 && /\bunica\b/.test(norm(clase[0].dependenciaInfo.nombre))) return { directa: true, sub: clase[0], unica: true };
-    const grupos = subs.filter((s) => s && s.dependenciaInfo && s.codigoUrl &&
-      tokensGuia(s.dependenciaInfo.nombre).palabras.some((x) => q.palabras.some((w) => x.indexOf(w) === 0))).slice(0, 3);
-    for (const g of grupos) {
-      if (gen !== GUIA.gen) return null;
-      const dg = await pedirPuente('guia', { op: 'json', ruta: rutaGuia(g.codigoUrl) });
-      const s = mejorGuia(q, (dg && dg.subDependencias) || []).unico;
-      if (s) return { directa: false, sub: s, grupo: g };
-    }
-    return null;
-  }
-
-  // La dependencia de una causa, en la Guía. Si hay una sola que corresponde,
-  // se la abre; si no, se muestran las posibles para que se elija.
-  async function guiaDeDependencia(dep, k) {
-    const partes = String(dep || '').split(/\s*-\s*/).map(limpio).filter(Boolean);
-    const principal = partes[0] || '';
-    const resto = partes.slice(1).join(' ');
-    const qp = tokensGuia(principal);
-    if (!qp.palabras.length) { avisar('No se sabe qué dependencia buscar en la Guía' + (k ? ' para ' + k : '') + '.', true); return; }
-    const consulta = qp.palabras.concat(qp.numeros.map(String)).join(' ');
-    const gen = ++GUIA.gen;
-    GUIA.modo = 'dep';
-    GUIA.texto = consulta;
-    GUIA.estado = 'leyendo';
-    GUIA.txt = 'Buscando ' + dep + ' en la Guía judicial...';
-    irAVista('guia');
-    try {
-      const r = await pedirPuente('guia', { op: 'buscar', ruta: '/api/dependencia/find', cuerpo: cuerpoGuia(consulta, 0, 50) });
-      if (gen !== GUIA.gen) return;
-      const lista = Array.isArray(r && r.content) ? r.content : [];
-      const { unico, validos } = mejorGuia(qp, lista);
-      const origen = (k ? k + ': ' : '') + dep;
-      GUIA.res = {
-        modo: 'dep', texto: consulta, lista: validos.length ? validos : lista, total: validos.length || (r && r.totalElements) || 0,
-        pagina: 0, paginas: 0,
-        nota: validos.length ? 'Hay más de una dependencia posible para ' + origen + '. Elegí la que corresponde.'
-          : 'La Guía no tiene una dependencia que coincida exactamente con ' + origen + '. Estos son los resultados de la búsqueda "' + consulta + '"' +
-            ((r && r.totalElements) > lista.length ? ' (los primeros ' + lista.length + '; afiná la búsqueda para ver otros)' : '') + '.'
-      };
-      GUIA.pila = [];
-      GUIA.nota = '';
-      if (!unico) {
-        GUIA.vista = 'res';
-        GUIA.estado = 'listo';
-        GUIA.txt = '';
-        pintarGuia();
-        return;
-      }
-      let d = await pedirPuente('guia', { op: 'json', ruta: rutaGuia(unico.codigoUrl) });
-      if (gen !== GUIA.gen) return;
-      if (!d || !d.dependencia || !d.dependencia.dependenciaInfo) throw new Error('la Guía no tiene datos de esa dependencia');
-      let resaltar = null;
-      let nota = 'Dependencia de ' + origen + '.';
-      const pila = [{ res: true }];
-      if (resto) {
-        const h = await subGuia(d, tokensGuia(resto), gen);
-        if (gen !== GUIA.gen) return;
-        if (h && h.directa) {
-          resaltar = h.sub.id;
-          if (h.unica) nota += ' La Guía no registra "' + resto + '" con su número: el juzgado tiene una sola, "' + limpio(h.sub.dependenciaInfo.nombre) + '", que es la resaltada.';
-        } else if (h) {
-          pila.push({ cod: d.dependencia.codigoUrl });
-          if (h.grupo && h.grupo.codigoUrl) pila.push({ cod: h.grupo.codigoUrl });
-          d = await pedirPuente('guia', { op: 'json', ruta: rutaGuia(h.sub.codigoUrl) });
-          if (gen !== GUIA.gen) return;
-          if (!d || !d.dependencia || !d.dependencia.dependenciaInfo) throw new Error('la Guía no tiene datos de esa dependencia');
-        } else {
-          nota += ' No se encontró en la Guía "' + resto + '": se muestra la dependencia principal.';
-        }
-      }
-      GUIA.det = d;
-      GUIA.vista = 'det';
-      GUIA.pila = pila;
-      GUIA.resaltar = resaltar;
-      GUIA.nota = nota;
-      GUIA.estado = 'listo';
-      GUIA.txt = '';
-    } catch (e) {
-      if (gen !== GUIA.gen) return;
-      GUIA.estado = 'error';
-      GUIA.txt = mensajeDe(e);
-    }
-    pintarGuia();
-  }
-
-  // Lo que muestra el sitio de cada dependencia: domicilio, teléfono, correo.
-  function lineasDependencia(info, dep) {
-    const out = [];
-    const dom = info && info.domicilio;
-    const piso = info && info.pisoOficinaDepartamento && info.pisoOficinaDepartamento !== '0' ? limpio(info.pisoOficinaDepartamento) : '';
-    if (dom && dom.domicilio) out.push(limpio(dom.domicilio) + (piso ? ', ' + piso : '') + (dom.codigoPostal ? ' (' + limpio(dom.codigoPostal) + ')' : ''));
-    const lugar = [dom && dom.localidad && dom.localidad.nombre, dom && dom.provincia && dom.provincia.nombre]
-      .map(limpio).filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join(', ');
-    if (lugar) out.push(lugar);
-    if (info && limpio(info.telefono)) out.push('Tel. ' + limpio(info.telefono) + (limpio(info.fax) ? ' · Fax ' + limpio(info.fax) : ''));
-    else if (info && limpio(info.fax)) out.push('Fax ' + limpio(info.fax));
-    if (info && limpio(info.email)) out.push(limpio(info.email));
-    const amb = dep && dep.ambitoTerritorial;
-    const ambTxt = Array.isArray(amb) ? amb.map((a) => limpio(a && (a.nombre || a.descripcion) ? (a.nombre || a.descripcion) : a)).filter(Boolean).join(', ') : limpio(amb);
-    if (ambTxt) out.push('Ámbito territorial: ' + ambTxt);
-    return out;
-  }
-
-  const correoHTML = (t) => (/^[^\s@]+@[^\s@]+$/.test(t) ? '<a href="mailto:' + esc(t) + '">' + esc(t) + '</a>' : esc(t));
-  const lineasHTML = (ls) => ls.map((l) => '<p>' + (/@/.test(l) && !/\s/.test(l) ? correoHTML(l) : esc(l)) + '</p>').join('');
-
-  // Nombre y contacto de una persona, con las mismas reglas de visibilidad que
-  // el sitio: el teléfono y el correo propios solo si la Guía los publica.
-  function personaGuia(dp) {
-    const p = (dp && dp.persona) || {};
-    const trat = limpio(p.personaTratamiento && p.personaTratamiento.nombre);
-    const nombre = [limpio(p.apellido), limpio(p.nombre)].filter(Boolean).join(', ');
-    let tel = '';
-    if (dp && dp.visibleTelefono && limpio(dp.telefono)) tel = limpio(dp.telefono);
-    else if (p.visibleTelefono === 1 && limpio(p.telefono)) tel = limpio(p.telefono);
-    const mail = p.visibleEmail === 1 && limpio(p.email) ? limpio(p.email) : '';
-    return {
-      nombre: (trat ? trat + ' ' : '') + nombre,
-      cargo: limpio(p.cargo && p.cargo.nombre),
-      situacion: limpio(p.situacionCargo && p.situacionCargo.nombre),
-      tel, mail
-    };
-  }
-
-  function integrantesHTML(lista) {
-    if (!lista || !lista.length) return '';
-    return '<table class="sj-t"><thead><tr><th>Función</th><th>Nombre</th><th>Cargo</th><th>Contacto</th></tr></thead><tbody>' +
-      lista.map((dp) => {
-        const x = personaGuia(dp);
-        const fun = limpio(dp.funcion && dp.funcion.nombre);
-        const sit = limpio(dp.situacionFuncion && dp.situacionFuncion.nombre);
-        return '<tr><td><b>' + esc(fun) + '</b>' + (sit && !/^normal$/i.test(sit) ? '<div class="sj-sub">' + esc(sit) + '</div>' : '') + '</td>' +
-          '<td>' + esc(x.nombre) + '</td>' +
-          '<td>' + esc(x.cargo) + (x.situacion ? '<div class="sj-sub">' + esc(x.situacion) + '</div>' : '') + '</td>' +
-          '<td>' + [x.tel ? esc(x.tel) : '', x.mail ? correoHTML(x.mail) : ''].filter(Boolean).join('<br>') + '</td></tr>';
-      }).join('') + '</tbody></table>';
-  }
-
-  function listaDependenciasHTML(lista, resaltar) {
-    if (!lista || !lista.length) return '';
-    return '<table class="sj-t"><thead><tr><th>Dependencia</th><th>Datos</th></tr></thead><tbody>' +
-      lista.map((s) => {
-        const info = (s && s.dependenciaInfo) || {};
-        const res = resaltar != null && s.id === resaltar;
-        return '<tr' + (res ? ' class="res" data-e="guiaResaltada"' : '') + '><td>' +
-          (s.codigoUrl ? '<button class="sj-vinculo" data-a="guiaAbrir" data-cod="' + esc(s.codigoUrl) + '"><b>' + esc(info.nombre) + '</b></button>' : '<b>' + esc(info.nombre) + '</b>') +
-          (res ? '<div class="sj-sub">la de la causa</div>' : '') + '</td>' +
-          '<td>' + lineasDependencia(info, s).map((l) => (/@/.test(l) && !/\s/.test(l) ? correoHTML(l) : esc(l))).join('<br>') + '</td></tr>';
-      }).join('') + '</tbody></table>';
-  }
-
-  function textoFichaGuia() {
-    const d = GUIA.det;
-    if (!d) return '';
-    const info = d.dependencia.dependenciaInfo;
-    const par = d.dependenciaParent && d.dependenciaParent.dependenciaInfo ? limpio(d.dependenciaParent.dependenciaInfo.nombre) : '';
-    const out = [limpio(info.nombre)].concat(par ? [par] : [], lineasDependencia(info, d.dependencia));
-    (d.integrantes || []).forEach((dp) => {
-      const x = personaGuia(dp);
-      out.push(limpio(dp.funcion && dp.funcion.nombre) + ': ' + x.nombre + (x.tel ? ' · Tel. ' + x.tel : '') + (x.mail ? ' · ' + x.mail : ''));
-    });
-    return out.join('\n');
-  }
-
-  function guiaCopiar() {
-    const t = textoFichaGuia();
-    if (!t) return;
-    const aMano = () => {
-      const a = document.createElement('textarea');
-      a.value = t;
-      a.style.cssText = 'position:fixed;left:-5000px;top:0';
-      document.body.appendChild(a);
-      a.select();
-      let fue = false;
-      try { fue = document.execCommand('copy'); } catch (x) { fue = false; }
-      a.remove();
-      avisar(fue ? 'Datos copiados.' : 'No se pudieron copiar los datos.', !fue);
-    };
-    try { window.navigator.clipboard.writeText(t).then(() => avisar('Datos copiados.'), aMano); } catch (x) { aMano(); }
-  }
-
-  function detalleGuiaHTML() {
-    const d = GUIA.det;
-    const dep = d.dependencia, info = dep.dependenciaInfo;
-    const par = d.dependenciaParent;
-    const raiz = dep.codigoUrl === 'guia-inicio';
-    const nav = '<div class="sj-guia-nav">' +
-      (GUIA.pila.length ? '<button class="sj-b chico" data-a="guiaVolver">← Volver</button>' : '') +
-      (par && par.codigoUrl && par.dependenciaInfo && par.codigoUrl !== dep.codigoUrl
-        ? '<button class="sj-b chico" data-a="guiaAbrir" data-cod="' + esc(par.codigoUrl) + '" title="Subir un nivel">↑ ' + esc(par.dependenciaInfo.nombre) + '</button>' : '') +
-      '</div>';
-    const lineas = lineasDependencia(info, dep);
-    const ficha = raiz ? '<h3>Guía judicial del PJN</h3><p>Elegí una dependencia o buscá por nombre. Los datos los carga cada tribunal en la Guía del PJN.</p>'
-      : '<div class="sj-guia-ficha"><h3>' + esc(info.nombre) + '</h3>' + lineasHTML(lineas) +
-        '<div class="bts"><button class="sj-b chico" data-a="guiaCopiar">Copiar los datos</button>' +
-        '<a class="sj-b chico" href="' + esc(guiaWeb(dep.codigoUrl)) + '" target="_blank" rel="noopener noreferrer">Ver en pjn.gov.ar ↗</a></div></div>';
-    const integ = integrantesHTML(d.integrantes);
-    const subs = listaDependenciasHTML(d.subDependencias, GUIA.resaltar);
-    return '<div class="sj-sec">' + nav + ficha + '</div>' +
-      (integ ? '<div class="sj-sec"><h4>Integrantes</h4>' + integ + '</div>' : '') +
-      (subs ? '<div class="sj-sec"><h4>' + (raiz ? 'Índice' : 'Dependencias') + '</h4>' + subs + '</div>' : '');
-  }
-
-  function resultadosGuiaHTML() {
-    const R = GUIA.res;
-    let h = '<div class="sj-sec">' + (GUIA.pila.length ? '<div class="sj-guia-nav"><button class="sj-b chico" data-a="guiaVolver">← Volver</button></div>' : '') +
-      (R.nota ? '<p class="sj-sol-txt">' + esc(R.nota) + '</p>' : '') +
-      '<p class="sj-sol-txt">' + esc(R.lista.length ? plural(R.total, 'resultado', 'resultados') + ' para "' + R.texto + '".' : 'No hay resultados para "' + R.texto + '".') + '</p></div>';
-    if (!R.lista.length) return h;
-    if (R.modo === 'per') {
-      h += '<div class="sj-sec"><table class="sj-t"><thead><tr><th>Nombre</th><th>Cargo</th><th>Dependencia</th><th>Contacto</th></tr></thead><tbody>' +
-        R.lista.map((it) => {
-          // El teléfono de la función, si lo hay, es el que publica el sitio.
-          const dp0 = it.subDependencias && it.subDependencias[0] && it.subDependencias[0].dependenciaPersona;
-          const x = personaGuia(dp0 ? Object.assign({}, dp0, { persona: it.persona || dp0.persona }) : { persona: it.persona });
-          const deps = (it.subDependencias && it.subDependencias.length
-            ? it.subDependencias.map((sd) => sd && sd.dependencia)
-            : ((it.persona && it.persona.dependencias) || [])).filter((s) => s && s.dependenciaInfo);
-          return '<tr><td><b>' + esc(x.nombre) + '</b></td><td>' + esc(x.cargo) + '</td><td>' +
-            deps.map((s) => (s.codigoUrl ? '<button class="sj-vinculo" data-a="guiaAbrir" data-cod="' + esc(s.codigoUrl) + '">' + esc(s.dependenciaInfo.nombre) + '</button>' : esc(s.dependenciaInfo.nombre))).join('<br>') +
-            '</td><td>' + [x.tel ? esc(x.tel) : '', x.mail ? correoHTML(x.mail) : ''].filter(Boolean).join('<br>') + '</td></tr>';
-        }).join('') + '</tbody></table></div>';
-    } else {
-      h += '<div class="sj-sec">' + listaDependenciasHTML(R.lista, null) + '</div>';
-    }
-    if (R.paginas > 1) {
-      h += '<div class="sj-pie"><span>Página ' + (R.pagina + 1) + ' de ' + R.paginas + '</span><span class="der">' +
-        '<button data-a="guiaPag" data-p="' + (R.pagina - 1) + '"' + (R.pagina <= 0 ? ' disabled' : '') + '>‹ Anterior</button>' +
-        '<button data-a="guiaPag" data-p="' + (R.pagina + 1) + '"' + (R.pagina + 1 >= R.paginas ? ' disabled' : '') + '>Siguiente ›</button></span></div>';
-    }
-    return h;
-  }
-
-  function guiaHTML() {
-    const codActual = GUIA.vista === 'det' && GUIA.det ? GUIA.det.dependencia.codigoUrl : '';
-    const barra = '<div class="sj-barra">' +
-      '<select data-gf="modo" title="Qué buscar"><option value="dep"' + (GUIA.modo === 'dep' ? ' selected' : '') + '>Dependencias</option>' +
-      '<option value="per"' + (GUIA.modo === 'per' ? ' selected' : '') + '>Magistrados y funcionarios</option></select>' +
-      '<input type="text" data-gf="texto" placeholder="' + (GUIA.modo === 'per' ? 'Apellido' : 'Por ejemplo: civil 74, correccional 11, casación penal') + '" value="' + esc(GUIA.texto) + '">' +
-      '<button class="sj-b prim" data-a="guiaBuscar"' + (GUIA.estado === 'leyendo' ? ' disabled' : '') + '>Buscar</button>' +
-      '<button class="sj-b" data-a="guiaInicio" title="Volver al índice de la Guía">Índice</button>' +
-      '<span class="der"><a class="sj-b" href="' + esc(guiaWeb(codActual)) + '" target="_blank" rel="noopener noreferrer" title="Abrir en el sitio del PJN, en una pestaña nueva">Guía en pjn.gov.ar ↗</a></span></div>';
-    let cuerpo = '';
-    if (GUIA.nota && GUIA.vista === 'det') cuerpo += '<div class="sj-info">' + esc(GUIA.nota) + '</div>';
-    if (GUIA.estado === 'leyendo') cuerpo += '<div class="sj-sec"><div class="sj-sol-txt">' + esc(GUIA.txt) + '</div><div class="sj-prog"><i style="width:35%"></i></div></div>';
-    else {
-      if (GUIA.estado === 'error') cuerpo += '<div class="sj-sec"><div class="sj-sol-txt mal">' + esc(GUIA.txt) + '</div></div>';
-      if (GUIA.vista === 'det' && GUIA.det) cuerpo += detalleGuiaHTML();
-      else if (GUIA.vista === 'res' && GUIA.res) cuerpo += resultadosGuiaHTML();
-    }
-    return '<div class="sj-bandeja">' + barra + '<div class="sj-cuerpo sj-guia" data-e="guiaCuerpo">' + cuerpo + '</div></div>';
-  }
-
-  function pintarGuia() {
-    if (VISTA !== 'guia' || !win) return;
-    const p = q('[data-e="vPanel"]');
-    if (!p) return;
-    const act = document.activeElement;
-    const campo = act && act.dataset && act.dataset.gf === 'texto' && p.contains(act) ? act.selectionStart : null;
-    p.innerHTML = guiaHTML();
-    if (campo != null) {
-      const n = p.querySelector('[data-gf="texto"]');
-      if (n) { n.focus(); try { n.setSelectionRange(campo, campo); } catch (x) { /* sin selección */ } }
-    }
-    const res = p.querySelector('[data-e="guiaResaltada"]');
-    if (res) res.scrollIntoView({ block: 'nearest' });
-  }
-
-  // Dejar cédula: abre Notificaciones en una pestaña nueva con el expediente
-  // cargado (ver "dejar cédula, en Notificaciones"). Sin expediente, abre el
-  // formulario vacío.
-  function dejarCedula(k) {
-    const url = EXT.notif.origen + RUTA_CEDULA;
-    if (!k) {
-      const w0 = window.open(url, '_blank');
-      if (!w0) avisar('Chrome bloqueó la pestaña nueva. Permití las ventanas emergentes de scw.pjn.gov.ar y probá de nuevo.', true);
-      return;
-    }
-    const px = partesExp(k);
-    if (!px) { avisar('No se reconoce el número de expediente ' + k + '.', true); return; }
-    if (!CUENTA) { avisar('No se pudo identificar con qué cuenta se entró a la Consulta Web, así que no se carga ningún expediente en Notificaciones. Recargá la página.', true); return; }
-    const exp = clave(k);
-    guardarAlmacen(K_CEDULA, { exp, sigla: px.sigla, num: px.num, anio: px.anio, cuenta: CUENTA, ts: Date.now() });
-    const w = window.open(url, '_blank');
-    if (!w) {
-      guardarAlmacen(K_CEDULA, null);
-      avisar('Chrome bloqueó la pestaña nueva. Permití las ventanas emergentes de scw.pjn.gov.ar y probá de nuevo.', true);
-      return;
-    }
-    avisar('Se abrió Notificaciones en una pestaña nueva, con ' + exp + ' cargado. La cédula se completa y se envía desde el formulario del PJN.');
-  }
-
-  // La dependencia de una causa: la de la lista o la del expediente abierto.
-  function depDe(k) {
-    const c = causaPorClave(k);
-    if (c && c.dep) return c.dep;
-    if (EXP.datos && EXP.datos.exp === k && EXP.datos.dep) return EXP.datos.dep;
-    return '';
   }
 
   // -------------------------------------------------------------- construir
@@ -7111,43 +5571,8 @@
       if (ef === 'texto') tElegir = setTimeout(aplicar, ESPERA_BUSQUEDA); else aplicar();
     });
 
-    // Bandejas (Escritos, Notificaciones, DEOX) y Guía.
-    let tBandeja = null;
-    win.addEventListener('input', (e) => {
-      const t = e.target;
-      const bf = t.dataset && t.dataset.bf;
-      if (bf) {
-        const cont = t.closest('[data-band]');
-        if (!cont) return;
-        const v = cont.dataset.band, B = BAND[v];
-        if (bf === 'texto') {
-          B.texto = t.value;
-          B.pagina = 1;
-          clearTimeout(tBandeja);
-          tBandeja = setTimeout(() => pintarCuerpoBandeja(v), ESPERA_BUSQUEDA);
-        } else if (bf === 'desde' || bf === 'hasta') {
-          B[bf] = t.value;
-        }
-        return;
-      }
-      if (t.dataset && t.dataset.gf === 'texto') GUIA.texto = t.value;
-    });
-
     win.addEventListener('change', (e) => {
       const t = e.target;
-      if (t.matches('[data-bf="bandeja"]')) {
-        const cont = t.closest('[data-band]');
-        if (!cont) return;
-        BAND[cont.dataset.band].bandeja = t.value;
-        consultarBandeja(cont.dataset.band);
-        return;
-      }
-      if (t.matches('[data-gf="modo"]')) {
-        GUIA.modo = t.value === 'per' ? 'per' : 'dep';
-        const campo = q('[data-gf="texto"]');
-        if (campo) campo.placeholder = GUIA.modo === 'per' ? 'Apellido' : 'Por ejemplo: civil 74, correccional 11, casación penal';
-        return;
-      }
       if (t.matches('[data-pp]')) {
         CFG.porPagina = parseInt(t.value, 10) || 25;
         PAGINA_VISTA.rel = 1;
@@ -7220,13 +5645,6 @@
     });
 
     win.addEventListener('keydown', (e) => {
-      const ds = (e.target && e.target.dataset) || {};
-      if (e.key === 'Enter' && ds.gf === 'texto') { e.preventDefault(); guiaBuscar(); return; }
-      if (e.key === 'Enter' && (ds.bf === 'desde' || ds.bf === 'hasta')) {
-        const cont = e.target.closest('[data-band]');
-        if (cont) { e.preventDefault(); BAND[cont.dataset.band][ds.bf] = e.target.value; consultarBandeja(cont.dataset.band); }
-        return;
-      }
       if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('sj-et-nombre')) {
         e.preventDefault();
         const b = e.target.closest('[data-marca]').querySelector('[data-a="crearEt"]');
@@ -7376,30 +5794,12 @@
   function alClic(e) {
     const t = e.target;
 
-    // Un enlace del menú abre su pestaña y el menú se cierra solo. Se lo cierra
-    // después del clic: quitarlo durante el clic podría cortar la apertura.
-    const vinculoMenu = t.closest('.sj-menu a.it');
-    if (vinculoMenu) { setTimeout(cerrarMenu, 0); return; }
-
     // La cruz de la solapa va antes que la solapa: está adentro del botón.
     const cx = t.closest('[data-cerrar]');
     if (cx) { cerrarSolapaExp(); return; }
 
     const sol = t.closest('[data-vista]');
     if (sol) { irAVista(sol.dataset.vista); return; }
-
-    const bo = t.closest('th[data-bo]');
-    if (bo) { ordenarBandeja(bo.dataset.v, bo.dataset.bo); return; }
-
-    const bp = t.closest('[data-bpag]');
-    if (bp) {
-      if (bp.disabled) return;
-      BAND[bp.dataset.v].pagina = parseInt(bp.dataset.bpag, 10) || 1;
-      pintarCuerpoBandeja(bp.dataset.v);
-      const cb = q('[data-e="bandCuerpo"]');
-      if (cb) cb.scrollTop = 0;
-      return;
-    }
 
     const th = t.closest('th[data-k]');
     if (th && !t.closest('[data-rs]')) {
@@ -7630,22 +6030,6 @@
         location.href = u;
         return;
       }
-      case 'cedulaUna': dejarCedula(k); return;
-      case 'verEscr': bandejaDeCausa('escr', k); return;
-      case 'verNotif': bandejaDeCausa('notif', k); return;
-      case 'verDeox': bandejaDeCausa('deox', k); return;
-      case 'verGuia': guiaDeDependencia(depDe(k), k); return;
-      case 'bandConsultar': consultarBandeja(b.dataset.v); return;
-      case 'bandSinCausa': BAND[b.dataset.v].causa = null; consultarBandeja(b.dataset.v); return;
-      case 'bandVer': pdfBandeja(b.dataset.v, b.dataset.id, false); return;
-      case 'bandBajar': pdfBandeja(b.dataset.v, b.dataset.id, true); return;
-      case 'guiaDep': guiaDeDependencia(b.dataset.dep); return;
-      case 'guiaBuscar': guiaBuscar(); return;
-      case 'guiaPag': guiaBuscar(Math.max(0, parseInt(b.dataset.p, 10) || 0)); return;
-      case 'guiaInicio': guiaInicio(); return;
-      case 'guiaAbrir': GUIA.nota = ''; guiaAbrir(b.dataset.cod, true); return;
-      case 'guiaVolver': guiaVolver(); return;
-      case 'guiaCopiar': guiaCopiar(); return;
       case 'diagnostico': revisarPJN(); return;
       case 'cortarDiag': cortarDiag(); return;
       case 'copiarDiag': copiarCuadro('diagTexto', 'Informe copiado.'); return;
@@ -7733,24 +6117,8 @@
         mostrarContra = false;
         irAVista('marcas');
         avisar('Contraseña guardada. Anotala donde guardes tus claves: sin ella el archivo no se abre en ninguna parte.');
-        // Con la contraseña puesta, la carpeta se lee y se guarda ya.
-        if (CARPETA) {
-          conectarCarpeta(false).then(() => {
-            pintarCopia();
-            if (VISTA === 'marcas') irAVista('marcas');
-            if (carpetaEstado === 'contra' && carpetaBloqueada) avisar('Contraseña guardada, pero no abre el respaldo que hay en la carpeta: ' + carpetaAviso + '.', true);
-          }).catch(() => { /* el estado de la carpeta ya lo informa */ });
-        }
         return;
       }
-      case 'pisarCarpeta':
-        if (!b.classList.contains('peligro')) { b.classList.add('peligro'); b.textContent = 'Confirmar: se reemplaza el respaldo de la carpeta'; return; }
-        pisarCarpeta().then((ok) => {
-          pintarCopia();
-          irAVista('marcas');
-          avisar(ok ? 'Listo: el respaldo de la carpeta tiene ahora los datos de esta PC, con la contraseña de esta PC.' : 'No se pudo guardar en la carpeta: ' + (carpetaAviso || 'revisá el permiso') + '.', !ok);
-        }).catch((e) => avisar('No se pudo guardar en la carpeta: ' + mensajeDe(e) + '.', true));
-        return;
       case 'verContra': mostrarContra = true; irAVista('marcas'); return;
       case 'ocultarContra': mostrarContra = false; irAVista('marcas'); return;
       case 'elegirCarpeta':
@@ -8124,32 +6492,6 @@
       soltar();
       if (!vivo()) return;
 
-      // Escritos, Notificaciones, DEOX y la Guía: se abren en segundo plano y se
-      // les pide una lista corta, de la última semana. Solo lectura.
-      for (const v of ['escr', 'notif', 'deox']) {
-        if (!vivo()) return;
-        const E = EXT[v], D = BANDEJAS[v];
-        try {
-          const ruta = D.ruta + '?bandeja=' + D.opciones[0][0] + '&fechaDesde=' + fechaAPI(isoHace(7)) + '&fechaHasta=' + fechaAPI(hoyISO());
-          const r = await pedirPuente(E.app, { op: 'lista', ruta, tope: 1, porPagina: 5 });
-          const items = r && Array.isArray(r.items) ? r.items : [];
-          const f = items.length ? D.fila(items[0], D.opciones[0][0]) : null;
-          if (!f) anotar(E.nombre, true, 'responde con la misma cuenta (no hay elementos de la última semana para mirar los datos)');
-          else anotar(E.nombre, !!(f.exp && f.fecha), f.exp && f.fecha ? 'responde con la misma cuenta, y se leen el expediente y la fecha' : 'responde, pero no se leen ' + (f.exp ? 'la fecha' : 'el expediente') + ': puede haber cambiado la forma de los datos');
-        } catch (e) {
-          anotar(E.nombre, false, String(e && e.message ? e.message : e));
-        }
-      }
-      if (!vivo()) return;
-      try {
-        const g = await pedirPuente('guia', { op: 'json', ruta: rutaGuia('guia-inicio') });
-        const ok = !!(g && g.dependencia && Array.isArray(g.subDependencias) && g.subDependencias.length);
-        anotar('Guía judicial', ok, ok ? 'responde y trae su índice' : 'responde, pero cambió la forma de los datos');
-      } catch (e) {
-        anotar('Guía judicial', false, String(e && e.message ? e.message : e));
-      }
-      if (!vivo()) return;
-
       // Un expediente: abrirlo, sus datos, sus actuaciones y un PDF. Se prueba
       // con una causa en trámite ya leída, mejor de la primera página.
       const leidas = (DATOS.rel && DATOS.rel.causas) || [];
@@ -8362,11 +6704,7 @@
       anotarFalla, borrarFallas, refrescarFallas, normalizarFallas, textoFallas, urlCorta,
       fallas: () => FALLAS, TOPE_FALLAS, ESPERAS_REINTENTO, traerPDF, descripcionActuacion,
       carpetaDePrueba: (h, leida) => { ponerCarpetaDePrueba(h, leida); },
-      // Escritos, Notificaciones, DEOX y la Guía.
-      tokensGuia, puntajeGuia, mejorGuia, filaEscrito, filaNotif, filaDeox, estadoDeox, destinoDeox, tipoDeox,
-      partesExp, expComparable, fechaAPI, msDe, RUTAS_PUENTE, menuPJNHTML, errorPuente, cuentaDelPuente, K_CEDULA,
-      estadoCarpeta: () => ({ estado: carpetaEstado, aviso: carpetaAviso, bloqueada: carpetaBloqueada }),
-      conectarCarpeta, importarDeCarpeta, pisarCarpeta, MARCA_ARCHIVO: MARCA
+      estadoCarpeta: () => ({ estado: carpetaEstado, aviso: carpetaAviso })
     });
     return;
   }

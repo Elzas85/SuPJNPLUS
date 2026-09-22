@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SuPJN+ - Consulta Web del PJN ampliada
 // @namespace    ignacio.kinbaum
-// @version      0.7.1
+// @version      0.7.2
 // @description  Ventana única sobre la Consulta Web del PJN: Mis causas y Favoritos, en trámite y fuera de trámite, con búsqueda, filtros, ordenamiento y columnas configurables; etiquetas y anotaciones propias, con copia manual o guardado automático en una carpeta designada; dejar nota en todas las causas habilitadas o en las seleccionadas; descarga de expedientes en PDF eligiendo causas desde la lista o actuaciones desde el expediente; escritos presentados, notificaciones electrónicas y DEOX, generales o de una causa, con sus PDF; dejar cédula con el expediente ya cargado en el formulario del PJN; la Guía judicial navegable y enlazada a cada causa; y acceso a las demás aplicaciones del PJN.
 // @author       Ignacio Kinbaum
 // @license      GPL-3.0-or-later
@@ -206,6 +206,15 @@
   };
   const NOMBRE_MARCO = 'supjn-puente-';
 
+  // La aplicacion de Android, cuando SuPJN+ corre dentro de ella. En el
+  // navegador no existe y todo sigue igual. Ahi el puente no puede ser un
+  // marco oculto (la aplicacion no puede meter SuPJN+ adentro de un marco de
+  // otro sitio), asi que cada aplicacion del PJN se abre en una vista aparte y
+  // los mensajes los lleva la aplicacion. Cambia el transporte y nada mas: los
+  // resguardos del puente (solo lectura por lista cerrada, la credencial que no
+  // sale, la misma cuenta) son los de mas abajo y valen igual.
+  const NATIVO = (typeof window.__supjnNativo === 'object' && window.__supjnNativo) || null;
+
   // Lo que el puente acepta. Todo es de lectura: listas, PDF y datos de la
   // Guía. Las búsquedas de la Guía van por POST porque así las pide el propio
   // sitio, pero no cambian nada.
@@ -252,7 +261,9 @@
     const cuitDe = cuitSSO;
 
     const enviar = (m) => {
-      try { window.parent.postMessage(Object.assign({ supjn: 'puente', app }, m), ORIGEN_SCW); } catch (e) { /* la ventana ya no está */ }
+      const msg = Object.assign({ supjn: 'puente', app }, m);
+      if (NATIVO) { NATIVO.aLaVentana(msg); return; }
+      try { window.parent.postMessage(msg, ORIGEN_SCW); } catch (e) { /* la ventana ya no está */ }
     };
 
     async function pedir(ruta, cuerpo) {
@@ -323,14 +334,18 @@
       throw new Error('consulta no admitida');
     }
 
-    window.addEventListener('message', (e) => {
-      if (e.origin !== ORIGEN_SCW || e.source !== window.parent) return;
-      const p = e.data;
+    const atenderPedido = (p) => {
       if (!p || p.supjn !== 'pedido' || p.app !== app || typeof p.id !== 'string') return;
       atender(p).then(
         (res) => enviar({ tipo: 'respuesta', id: p.id, ok: true, res }),
         (err) => enviar({ tipo: 'respuesta', id: p.id, ok: false, error: String(err && err.message ? err.message : err) })
       );
+    };
+
+    if (NATIVO) NATIVO.alRecibir = atenderPedido;
+    window.addEventListener('message', (e) => {
+      if (e.origin !== ORIGEN_SCW || e.source !== window.parent) return;
+      atenderPedido(e.data);
     });
 
     // Aviso a la ventana de que el marco ya puede atender: la Guía enseguida;
@@ -500,6 +515,9 @@
 
   const APP_PUENTE = APPS_PUENTE[location.hostname];
   if (APP_PUENTE) {
+    // En la aplicacion de Android estas paginas se abren en una vista aparte,
+    // fuera de la pantalla, y la aplicacion avisa que esa vista es del puente.
+    if (NATIVO && NATIVO.esPuente) { puenteEnMarco(APP_PUENTE); return; }
     let deLaConsulta = false;
     try {
       // En Chrome, ancestorOrigins dice quién abrió el marco. Aunque faltara, el
@@ -528,7 +546,7 @@
 
   const APP = {
     nombre: 'SuPJN+',
-    version: 'beta 0.7.1',
+    version: 'beta 0.7.2',
     autor: 'Ignacio Kinbaum',
     anio: '2026',
     mail: 'estudiojuridicokinbaum@gmail.com',
@@ -5713,6 +5731,7 @@
     if (P) {
       if (P.rechazar) P.rechazar(new Error('marco'));
       if (P.fr) P.fr.remove();
+      if (NATIVO) NATIVO.cerrarPuente(app);
     }
     PEDIDOS.forEach((pd, id) => {
       if (pd.app !== app) return;
@@ -5727,12 +5746,6 @@
     const E = EXT[VISTA_DE_APP[app]];
     const P = PUENTES[app] = { fr: null, cuit: '', alListo: null, rechazar: null, listo: null };
     P.listo = new Promise((resolve, reject) => {
-      const fr = document.createElement('iframe');
-      fr.name = NOMBRE_MARCO + app;
-      fr.setAttribute('aria-hidden', 'true');
-      fr.tabIndex = -1;
-      fr.className = 'supjn-marco';
-      fr.style.cssText = 'position:fixed;left:-5000px;top:0;width:1024px;height:768px;border:0;visibility:hidden;pointer-events:none';
       const t = setTimeout(() => {
         P.rechazar = null;
         if (PUENTES[app] === P) cerrarPuente(app);
@@ -5740,6 +5753,15 @@
       }, ESPERA_PUENTE);
       P.alListo = () => { clearTimeout(t); P.alListo = null; P.rechazar = null; resolve(P); };
       P.rechazar = (err) => { clearTimeout(t); P.alListo = null; P.rechazar = null; reject(err); };
+      // En la aplicacion de Android el sitio se abre en una vista aparte, fuera
+      // de la pantalla; en el navegador, en un marco oculto de esta misma pagina.
+      if (NATIVO) { NATIVO.abrirPuente(app, E.origen + E.inicio); return; }
+      const fr = document.createElement('iframe');
+      fr.name = NOMBRE_MARCO + app;
+      fr.setAttribute('aria-hidden', 'true');
+      fr.tabIndex = -1;
+      fr.className = 'supjn-marco';
+      fr.style.cssText = 'position:fixed;left:-5000px;top:0;width:1024px;height:768px;border:0;visibility:hidden;pointer-events:none';
       P.fr = fr;
       fr.src = E.origen + E.inicio;
       document.body.appendChild(fr);
@@ -5747,12 +5769,9 @@
     return P.listo;
   }
 
-  window.addEventListener('message', (e) => {
-    const m = e.data;
-    if (!m || m.supjn !== 'puente' || typeof m.app !== 'string') return;
+  function delPuente(m) {
     const P = PUENTES[m.app];
-    const E = EXT[VISTA_DE_APP[m.app]];
-    if (!P || !E || !P.fr || e.origin !== E.origen || e.source !== P.fr.contentWindow) return;
+    if (!P) return;
     if (m.tipo === 'listo') {
       // Si la aplicación vuelve a entrar (por ejemplo, con otra cuenta), vale la última.
       P.cuit = String(m.cuit || '');
@@ -5771,7 +5790,28 @@
       PEDIDOS.delete(m.id);
       if (m.ok) pd.resolve(m.res); else pd.reject(new Error(String(m.error || 'error')));
     }
+  }
+
+  // Del marco oculto, en el navegador: tiene que venir del marco que abrio
+  // SuPJN+ y del sitio que corresponde.
+  window.addEventListener('message', (e) => {
+    const m = e.data;
+    if (!m || m.supjn !== 'puente' || typeof m.app !== 'string') return;
+    const P = PUENTES[m.app];
+    const E = EXT[VISTA_DE_APP[m.app]];
+    if (!P || !E || !P.fr || e.origin !== E.origen || e.source !== P.fr.contentWindow) return;
+    delPuente(m);
   });
+
+  // De la vista aparte, en la aplicacion de Android: la aplicacion entrega el
+  // mensaje de la vista de esa misma aplicacion del PJN y de ninguna otra.
+  if (NATIVO) {
+    NATIVO.alRecibir = (m) => {
+      if (!m || m.supjn !== 'puente' || typeof m.app !== 'string') return;
+      if (!PUENTES[m.app] || !EXT[VISTA_DE_APP[m.app]]) return;
+      delPuente(m);
+    };
+  }
 
   function armarEspera(id, pd) {
     clearTimeout(pd.timer);
@@ -5785,7 +5825,9 @@
       PEDIDOS.set(id, pd);
       armarEspera(id, pd);
       try {
-        P.fr.contentWindow.postMessage(Object.assign({}, datos, { supjn: 'pedido', app, id }), EXT[VISTA_DE_APP[app]].origen);
+        const msg = Object.assign({}, datos, { supjn: 'pedido', app, id });
+        if (NATIVO) NATIVO.alPuente(app, msg);
+        else P.fr.contentWindow.postMessage(msg, EXT[VISTA_DE_APP[app]].origen);
       } catch (e) {
         clearTimeout(pd.timer);
         PEDIDOS.delete(id);

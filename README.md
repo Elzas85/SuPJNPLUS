@@ -4,7 +4,9 @@ Userscript para **Tampermonkey** que reúne, en **una sola ventana**, la
 [Consulta Web del Poder Judicial de la Nación (PJN)](https://scw.pjn.gov.ar/).
 
 Incorpora la totalidad de **PJN+** y agrega las causas propias, los favoritos,
-dejar nota y el acceso a las demás aplicaciones del PJN, en la misma interfaz.
+dejar nota, los escritos presentados, las notificaciones electrónicas, los DEOX,
+la Guía judicial y el acceso a las demás aplicaciones del PJN, en la misma
+interfaz.
 
 ## Qué hace
 
@@ -59,10 +61,11 @@ está minimizada, el indicador se pone **rojo** y señala que hay un aviso.
 - Tiene **solapa propia**, entre Favoritos y Descargas.
 - En **todas** las causas que el PJN habilite ese día, o solo en las
   **seleccionadas** en Mis causas o en Favoritos.
-- Solicita **confirmación** antes de comenzar y advierte si ese día ya se dejó
-  nota en alguna de esas causas. La operación se realiza en la lista de
-  Relacionados del PJN; la página se recarga una vez por nota y el avance se
-  informa en la ventana.
+- La solapa **advierte antes**, no después: al entrar ya informa cuántas causas
+  entran, cuáles tienen nota de ese día y cuáles no están en Mis causas. El
+  botón es el definitivo y arranca la tanda, sin un paso intermedio de
+  confirmación. La operación se realiza en la lista de Relacionados del PJN; la
+  página se recarga una vez por nota y el avance se informa en la ventana.
 - Cada nota queda con su resultado: **dejada**, **a verificar** (el PJN no
   respondió y corresponde constatarlo en el expediente) o **no salió**. Nunca se
   da por dejada una nota que el PJN no confirmó **para esa causa**: un incidente
@@ -86,8 +89,8 @@ está minimizada, el indicador se pone **rojo** y señala que hay un aviso.
   por tipo o una por una. Cada causa se entrega en un PDF.
 - **Una sola actuación:** el botón **Descargar** de cada fila, junto a **Ver**,
   obtiene esa actuación aislada, con nombre propio y sin modificar la selección.
-- Las actuaciones se presentan en **columnas** (Fecha, Tipo de actuación,
-  Descripción / detalle y Fs.): se ordenan, se reubican, se ensanchan y se
+- Las actuaciones se presentan en **columnas** (Fecha, Tipo, Descripción /
+  detalle y Fs.): se ordenan, se reubican, se ensanchan y se
   ocultan igual que las de la lista. **Orden del PJN** restituye el orden en que
   las entrega el sitio, que es el del PDF.
 - Las descargas se ejecutan de a una en segundo plano, de modo que se puede
@@ -112,14 +115,125 @@ está minimizada, el indicador se pone **rojo** y señala que hay un aviso.
   hay contenido cuando lo ocurrido es que la solapa no terminó de cargarse.
 - Desde **Causas vinculadas** se abre cada causa en esta pestaña o en una nueva,
   y se descarga su expediente completo, aunque no figure en las listas propias.
+- La solapa **Este expediente** se cierra con su cruz, y vuelve a aparecer al
+  abrir otra causa.
+
+### Escritos, Notificaciones y DEOX
+
+Cada uno tiene **solapa propia** en la ventana, con la información de su sistema
+del PJN:
+
+- **Escritos:** los presentados, por bandeja (enviados a dependencia, enviados a
+  autorizador, archivados), con la fecha, el expediente, la carátula, la
+  dependencia, el estado y la fecha de aceptación.
+- **Notificaciones:** las cédulas electrónicas recibidas y enviadas, con su
+  número, el expediente, el juzgado de radicación, el emisor y los
+  destinatarios.
+- **DEOX:** los oficios electrónicos enviados, con su número, el tipo, el motivo,
+  el destino, el estado (Enviado, Respondido, Incorporado, Cerrado) y la fecha
+  de respuesta. Los urgentes van marcados.
+
+En las tres se elige la bandeja y el rango de fechas (de manera predeterminada,
+los últimos 60 días en Escritos, los últimos 30 en Notificaciones y el último
+año en DEOX) y se pulsa **Consultar**; la primera vez se consulta sola. Sobre lo
+leído hay un **buscador**, las columnas se **ordenan** pulsando el título y la
+lista se pagina de a 50. Cada fila tiene **Ver** (el PDF en una pestaña nueva),
+**⇩** (descargarlo con nombre propio), **✉** (dejar cédula en esa causa, ver más
+abajo) y **↗** (abrir el expediente en la Consulta Web, en una pestaña nueva). Las causas que están en Mis causas o en Favoritos
+muestran sus etiquetas.
+
+**Por causa:** el menú **⋯** de una causa, y los botones del expediente abierto,
+llevan a los escritos, las notificaciones o los DEOX **de esa causa, de
+cualquier fecha** (con sus incidentes). Un rótulo en la barra indica el filtro, y
+su cruz lo quita.
+
+**Cómo lo obtiene.** Son aplicaciones aparte del PJN, cada una con su ingreso por
+el SSO. SuPJN+ las abre en segundo plano, en un marco oculto, con la misma sesión
+ya iniciada, y les pide la información desde ahí. Antes de mostrar nada
+**comprueba que la sesión de esa aplicación sea de la misma cuenta** que la de la
+Consulta Web: si no lo es, no muestra nada y lo informa. Solo lee: no presenta,
+no archiva ni borra nada, y la conexión con esas aplicaciones solo admite una
+lista cerrada de consultas de lectura. Lo consultado queda en memoria mientras
+la página esté abierta y **no se guarda en el equipo**.
+
+Si la sesión de alguna de esas aplicaciones venció, la ventana lo informa:
+alcanza con abrirla desde **Funciones del PJN**, ingresar si lo pide y volver a
+consultar.
+
+### Dejar cédula
+
+SuPJN+ **no envía cédulas**: simplifica el comienzo del formulario de
+Notificaciones del PJN y deja el resto en ese formulario.
+
+- **Desde dónde:** el menú **⋯** de una causa, el botón **Dejar cédula** del
+  expediente abierto, el **✉** de cada fila de Escritos, Notificaciones y DEOX y
+  de las causas vinculadas, **Nueva cédula** (o **Dejar cédula en esta causa**)
+  en la solapa Notificaciones, y **Nueva cédula electrónica** en Funciones del
+  PJN.
+- **Qué hace:** abre Notificaciones en una pestaña nueva, carga la jurisdicción,
+  el número y el año, pulsa Siguiente (que solo busca la causa) y **elige el
+  expediente o el incidente exacto** ("CIV 76436/2025" y no "CIV 76436/2025/1").
+  Un cartel encima del formulario dice qué se eligió.
+- **Qué queda para el formulario del PJN:** los destinatarios, los despachos, el
+  texto y el envío. SuPJN+ no pulsa Guardar ni Enviar.
+- **Si el PJN no ofrece la causa:** el sistema solo ofrece las causas en las que
+  el letrado constituyó domicilio electrónico. En ese caso el cartel lo dice.
+- **Misma cuenta:** si Notificaciones está abierto con otra cuenta que la de la
+  Consulta Web, no se carga nada y se avisa.
+- El pedido vale cinco minutos y se usa una sola vez. Si Notificaciones pide
+  ingresar, espera a que se ingrese y sigue.
+
+### Guía judicial
+
+La solapa **Guía** muestra la Guía judicial del PJN dentro de la ventana:
+
+- El **índice**, para recorrer por niveles (fueros, cámaras, juzgados,
+  secretarías y salas), con botones para subir un nivel y para volver.
+- La **búsqueda** por dependencia ("civil 74", "correccional 11", "casación
+  penal") o por magistrado o funcionario (por apellido), con Enter o con
+  **Buscar**.
+- De cada dependencia: **domicilio, piso, código postal, teléfono, correo** e
+  **integrantes** con su función y su cargo, y sus dependencias internas con los
+  mismos datos. **Copiar los datos** los deja en el portapapeles, listos para un
+  escrito o un oficio. El teléfono y el correo propios de una persona se
+  muestran solo cuando la Guía los publica, igual que en el sitio del PJN.
+
+**Desde una causa:** **Datos del juzgado** en el menú **⋯**, **Juzgado en la
+Guía** en el expediente abierto, o un clic sobre la dependencia en Escritos,
+Notificaciones o DEOX, abren directamente la dependencia que corresponde. SuPJN+
+traduce la forma en que el expediente nombra al tribunal ("JUZGADO NACIONAL EN LO
+CRIMINAL Y CORRECCIONAL NRO. 11 - SECRETARÍA NRO. 133") a la de la Guía
+("Juzgado Criminal y Correccional Nro. 11", "Secretaría Nro. 133"), exige que los
+números coincidan y **resalta la secretaría**; si se trata de una sala, abre la
+sala ("SALA 5" es "Sala V"). Cuando la Guía registra una sola secretaría como
+"Secretaría Única", resalta esa y lo aclara. Si hay más de una dependencia
+posible, **no elige**: las muestra para que se elija la correcta.
 
 ### Las demás aplicaciones del PJN
 
-El botón **Funciones del PJN** de la barra azul conduce a las listas del sitio, a
-Radicaciones, a la consulta pública y a las restantes aplicaciones: **Escritos**
-(presentar y consultar presentados), **DEOX**, **Notificaciones**, **IWECS**,
-**Autorizados** y **Mis eventos** del Portal. Por causa, el menú **⋯** ofrece
-abrir en esta pestaña o en una nueva, **libro digital** y **presentar escrito**.
+El botón **Funciones del PJN** de la barra azul abre, **siempre en una pestaña
+nueva**, las listas del sitio, Radicaciones, la consulta pública, los datos
+personales y las restantes aplicaciones: **Nueva cédula electrónica**,
+**Escritos** (presentar y consultar presentados), **DEOX**, **Notificaciones**,
+**IWECS**, **Autorizados** y **Mis eventos** del Portal. La pestaña donde está SuPJN+ no se mueve. Por causa, el
+menú **⋯** ofrece abrir en esta pestaña o en una nueva, **libro digital** y
+**presentar escrito**.
+
+Ese mismo menú incluye **Cerrar sesión del PJN**, para usar al terminar. No
+cierra si hay una tanda de nota o descargas en curso: primero avisa, porque eso
+sí se perdería.
+
+### La sesión mientras se trabaja
+
+El PJN cierra la sesión por inactividad, y eso corta una tanda de nota o una
+descarga por la mitad. Mientras se está trabajando, SuPJN+ le toca la sesión al
+sitio cada pocos minutos para que no caduque.
+
+Lo hace **solo si hay alguien trabajando**: actividad reciente en la pantalla, o
+un trabajo en curso. Si el equipo queda desatendido, el refresco se detiene y la
+sesión caduca como siempre. Es deliberado: una sesión que no caduca nunca queda
+a mano de cualquiera que se siente frente a la máquina, que es exactamente lo que
+se busca evitar.
 
 ## Cómo se usa
 
@@ -144,8 +258,9 @@ tiene causas en una lista, la ventana lo informa en lugar de quedar en blanco.
 SuPJN+ depende de la estructura de la página del PJN. En **Acerca de** hay un
 botón **Revisar el PJN**: examina, en segundo plano y sin dejar notas ni
 modificar nada, las piezas que SuPJN+ necesita (la tabla de causas, el paginador,
-el enlace para abrir, la función de dejar nota, la tabla de actuaciones y un PDF)
-e informa cuáles siguen en su lugar y cuáles cambiaron. Genera un informe para
+el enlace para abrir, la función de dejar nota, Escritos, Notificaciones, DEOX,
+la Guía judicial, la tabla de actuaciones y un PDF) e informa cuáles siguen en
+su lugar y cuáles cambiaron. Genera un informe para
 copiar y remitir a quien mantiene SuPJN+: **no incluye números de causa ni datos
 personales**.
 
@@ -175,7 +290,9 @@ remitirse sin revelar de qué causa se trata.
 
 Las listas leídas, las etiquetas, las anotaciones, el resultado de dejar nota y
 el registro de fallas se guardan **únicamente en este equipo**, en el almacén de
-Tampermonkey. No se envían a ningún servidor y no se escriben en el PJN.
+Tampermonkey. No se envían a ningún servidor y no se escriben en el PJN. Lo que
+se consulta en Escritos, Notificaciones, DEOX y la Guía no se guarda: dura
+mientras la página esté abierta.
 
 **Separado por cuenta del PJN.** El almacén de Tampermonkey pertenece al
 navegador y no a la sesión del PJN, y además se comparte con las ventanas de
@@ -197,17 +314,36 @@ nota en el expediente.
 Hay dos formas de respaldar, en la solapa **Respaldo**:
 
 - **Una carpeta designada por el usuario.** Con **Elegir carpeta**, SuPJN+ escribe
-  allí un archivo por cuenta (`SuPJN+-datos-<cuenta>.json`) con las etiquetas, las
-  anotaciones y el registro de dejar nota, cada vez que algo cambia, y lo lee al
-  abrir. Solo importa el archivo de la cuenta con la que se ingresó. Con la
+  allí un archivo por cuenta (`SuPJN+-datos-<cuenta>.supjn`) con las etiquetas,
+  las anotaciones y el registro de dejar nota, cada vez que algo cambia, y lo lee
+  al abrir. Solo importa el archivo de la cuenta con la que se ingresó. Con la
   carpeta sincronizada (OneDrive o Drive) sirve para trabajar en dos equipos.
+  **Desde la 0.7.1 ese archivo va cifrado**, con la misma contraseña y el mismo
+  formato que la copia manual (ver más abajo): en el uso diario no se pide
+  nada. Sin contraseña puesta, SuPJN+ no escribe en la carpeta y lo avisa en la
+  barra de la lista. En la otra PC hay que poner la misma contraseña una vez;
+  hasta entonces SuPJN+ no lee ni pisa el respaldo de la carpeta. Si se cambió
+  la contraseña a propósito, hay un botón para reemplazar el respaldo de la
+  carpeta con los datos de esa PC. El archivo en claro de las versiones
+  anteriores (`.json`) se lee una vez y se borra cuando ya quedó escrito el
+  cifrado; OneDrive o Drive pueden conservarlo en su papelera.
   Conviene una carpeta **ajena a la del programa**: si se trata de un repositorio
   de Git, SuPJN+ lo advierte, porque las anotaciones podrían terminar publicadas.
   Chrome solicita el permiso una vez y en ocasiones vuelve a solicitarlo: cuando
   ocurre, la ventana lo informa y ofrece un botón para otorgarlo de nuevo.
-- **Una copia manual.** **Exportar** guarda el mismo archivo donde se indique. La
-  ventana muestra la fecha de la última copia y la señala en rojo cuando han
-  transcurrido más de 15 días.
+- **Una copia manual.** **Exportar** guarda el archivo donde se indique, también
+  formato propio (`.supjn`) y cifrado con una contraseña del usuario. No se abre
+  con un editor de texto, no lo leen los indexadores de escritorio ni de la
+  nube, y sin la contraseña no se recupera en ninguna parte. La contraseña se
+  pone una sola vez, en la solapa **Respaldo**, y queda en ese equipo: allí no
+  se la vuelve a pedir, ni para exportar ni para importar. Al importar el
+  archivo en otra máquina sí hay que escribirla. La ventana muestra la fecha de
+  la última copia y la señala en rojo cuando han transcurrido más de 15 días.
+
+  Lo que se protege es el archivo cuando sale del equipo, que es donde queda
+  fuera de control: en una carpeta sincronizada, en un pendrive o adjunto en un
+  correo. Lo guardado dentro del equipo sigue como está, detrás de la sesión de
+  Windows.
 
 Para trasladar los datos a otro equipo, **Importar**. No elimina nada: suma las
 etiquetas faltantes y de cada causa conserva lo más reciente (la anotación más
@@ -230,6 +366,24 @@ los paneles y dos scripts operan sobre los mismos lápices.
 
 Tampermonkey consulta ese mismo enlace y se **actualiza automáticamente** cuando
 se publica una versión con número mayor.
+
+Desde la versión 0.7.0, SuPJN+ también se carga en **escritos.pjn.gov.ar**,
+**notif.pjn.gov.ar**, **deox.pjn.gov.ar** y **www.pjn.gov.ar/guia**. Ahí no
+dibuja nada: solo atiende las consultas de la ventana cuando esta abre esas
+aplicaciones en segundo plano. Si Tampermonkey pide confirmar los sitios nuevos
+al actualizar, hay que aceptarlos.
+
+## En el teléfono
+
+**SuPJN+ para Android es una aplicación aparte**, en su propia carpeta
+(`SuPJN+ Android`), con su propio número de versión y su propia documentación.
+Lo que se instala en la computadora y lo que se instala en el teléfono no
+dependen uno del otro: cambiar este userscript no obliga a tocar la aplicación,
+y al revés tampoco.
+
+El programa que hace el trabajo es el mismo. La aplicación lo arma tomando este
+archivo y agregándole lo que Android necesita, de modo que no hay dos copias que
+puedan separarse sin que nadie se entere.
 
 ## Autor
 
