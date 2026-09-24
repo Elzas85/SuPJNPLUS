@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SuPJN+ - Consulta Web del PJN ampliada
 // @namespace    ignacio.kinbaum
-// @version      1.3.5
+// @version      1.3.4
 // @description  Ventana única sobre la Consulta Web del PJN: Mis causas y Favoritos, en trámite y fuera de trámite, con búsqueda, filtros, ordenamiento y columnas configurables; etiquetas y anotaciones propias, con copia manual o guardado automático en una carpeta designada; dejar nota en todas las causas habilitadas o en las seleccionadas; descarga de expedientes en PDF eligiendo causas desde la lista o actuaciones desde el expediente; escritos presentados, notificaciones electrónicas y DEOX, generales o de una causa, con sus PDF; dejar cédula con el expediente ya cargado en el formulario del PJN; la Guía judicial navegable y enlazada a cada causa; y acceso a las demás aplicaciones del PJN.
 // @author       Ignacio Kinbaum
 // @license      GPL-3.0-or-later
@@ -4297,64 +4297,6 @@
     return L;
   }
 
-  // ------------------------------------------- 5.9 aviso de filtros puestos
-
-  // El pie de la tabla venía diciendo "(filtradas de 232)", pero está abajo de
-  // todo: el renglón de arriba decía "232 causas" y se lo leía como la lista
-  // entera. Pasó el 23/09/2026 con el botón Novedades, que había quedado
-  // puesto de la vez anterior: se veían 10 de 232 y parecía que el programa no
-  // traía las causas. Lo de acá abajo es para que el aviso esté donde se mira.
-
-  // Cada una contesta si ese filtro está puesto, con el mismo criterio que usa
-  // filtradas() para dejar causas afuera. Si acá dice que no hay filtro y
-  // filtradas() igual saca causas, el aviso mentiría.
-  const filtroTexto = () => !!norm(CFG.texto);
-  const filtroFuero = () => !!CFG.fuero;
-  const filtroSit = () => !!CFG.sit;
-  const filtroTramite = () => CFG.tramite === 'si' || CFG.tramite === 'no';
-  const filtroEtiqueta = () => !!CFG.etiqueta;
-  const filtroFechas = () => !!(numDeInput(CFG.desde) || numDeInput(CFG.hasta));
-  const filtroNovedades = () => !!CFG.novedades;
-
-  // Los filtros puestos, con el nombre que tienen en la barra de arriba, en el
-  // mismo orden en que están los controles.
-  function filtrosDeLaLista() {
-    const f = [];
-    if (filtroTexto()) f.push('búsqueda');
-    if (filtroFuero()) f.push('fuero');
-    if (filtroSit()) f.push('situación');
-    if (filtroTramite()) f.push('trámite');
-    if (filtroEtiqueta()) f.push('etiqueta');
-    if (filtroFechas()) f.push('fechas');
-    if (filtroNovedades()) f.push('novedades');
-    return f;
-  }
-
-  // Cuántas causas quedaron a la vista y cuántas hay en la lista. Lo anota
-  // pintarTabla, que ya las contó: así el renglón de arriba no vuelve a
-  // filtrar ni a ordenar la lista para decir el número.
-  const FILTRANDO = { muestra: 0, total: 0 };
-
-  const anotarFiltrando = (muestra, total) => {
-    FILTRANDO.muestra = muestra;
-    FILTRANDO.total = total;
-  };
-
-  const rotuloFiltros = (f) => (f.length === 1 ? 'hay un filtro puesto: ' : 'hay filtros puestos: ') + f.join(', ');
-
-  const TITULO_FILTRANDO = 'La lista está filtrada: lo que se ve no son todas las causas. ' +
-    'El botón de al lado saca todos los filtros de una vez.';
-
-  // El aviso que se agrega al renglón de arriba. Devuelve texto vacío cuando no
-  // hay ningún filtro puesto, y entonces ese renglón queda como estaba.
-  function avisoFiltrosHTML() {
-    const f = filtrosDeLaLista();
-    if (!f.length) return '';
-    return ' <span class="sj-filtrando" title="' + esc(TITULO_FILTRANDO) + '">' +
-      esc('mostrando ' + FILTRANDO.muestra + ' de ' + FILTRANDO.total + ' · ' + rotuloFiltros(f)) + '</span>' +
-      ' <button class="sj-b chico" data-a="limpiar" title="' + esc(TITULO_FILTRANDO) + '">Quitar los filtros</button>';
-  }
-
   // ------------------------------------------------------------- 6.1 estilos
 
   const CSS = [
@@ -4418,9 +4360,6 @@
     '.sj-b:disabled{opacity:.45;cursor:default}',
     '.sj-est{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:6px 12px;border-bottom:1px solid #e6ecef;flex:none;font-size:12px;color:#3a4c54}',
     '.sj-est .txt{flex:1 1 300px}',
-    // El aviso de que la lista está filtrada. Va en ámbar y no en gris: tiene
-    // que saltar a la vista en el mismo renglón donde se lee cuántas causas hay.
-    '.sj-est .sj-filtrando{display:inline-block;background:#fdf3d3;border:1px solid #dcb851;color:#6d5200;border-radius:9px;padding:0 8px;font-weight:600}',
     '.sj-copia{border-radius:12px;padding:3px 10px;font-weight:600;cursor:pointer;border:1px solid transparent;font-size:11.5px}',
     '.sj-copia.ok{background:#e6f4ea;color:#1b6b3a;border-color:#b8dfc4}',
     '.sj-copia.vieja{background:#fdecea;color:#b3261e;border-color:#f3c3be}',
@@ -4784,8 +4723,7 @@
     e.innerHTML = esc(plural(D.total, 'causa', 'causas') + ' (' + D.enTramite + ' en trámite, ' + fuera + ' fuera de trámite) · ') +
       '<span class="sj-leido' + (vieja ? ' vieja' : '') + '" title="' + esc('Leídas el ' + fechaHora(D.fecha) + '. El PJN no avisa cuando cambia algo: esto es lo que había en esa lectura.') + '">' +
       esc('leídas ' + hace(D.fecha)) + '</span>' +
-      (vieja ? ' <button class="sj-b chico" data-a="actualizar" title="Volver a leer las listas del PJN">Volver a leer</button>' : '') +
-      avisoFiltrosHTML();
+      (vieja ? ' <button class="sj-b chico" data-a="actualizar" title="Volver a leer las listas del PJN">Volver a leer</button>' : '');
   }
 
   function pintarCopia() {
@@ -5167,13 +5105,9 @@
         ? 'Leyendo ' + LISTAS[tipo].pjn + ' en segundo plano. La primera vez tarda un poco.'
         : 'Todavía no se leyó ' + LISTAS[tipo].nombre + '. Pulsá "Actualizar".') + '</div>';
       pie.innerHTML = '';
-      anotarFiltrando(0, 0);
       return;
     }
     const L = filtradas();
-    // Los dos números del aviso de filtros salen de acá, que es donde ya están
-    // contados: el renglón de arriba los lee, no los vuelve a calcular.
-    anotarFiltrando(L.length, D.total);
     const porPag = CFG.porPagina;
     const paginas = Math.max(1, Math.ceil(L.length / porPag));
     const pagina = Math.max(1, Math.min(PAGINA_VISTA[tipo], paginas));
@@ -5231,9 +5165,6 @@
       ' <select data-pp title="Causas por página">' + [10, 15, 20, 25, 30, 40, 50, 75, 100]
         .map((n) => '<option value="' + n + '"' + (n === porPag ? ' selected' : '') + '>' + n + ' por página</option>').join('') +
       '</select></span>';
-    // Cada vez que se rehace la tabla cambian los números del aviso de filtros,
-    // que está arriba: se lo rehace acá para que no quede diciendo otra cosa.
-    pintarEstado();
   }
 
   // --------------------------------------------------------------- 6.7 menús

@@ -3,19 +3,28 @@
 Userscript para **Tampermonkey** que reúne, en **una sola ventana**, la
 [Consulta Web del Poder Judicial de la Nación (PJN)](https://scw.pjn.gov.ar/).
 
-Incorpora la totalidad de **PJN+** y agrega las causas propias, los favoritos,
+Incorpora la totalidad de **PJN+** y de **NOTATOMIC**, y agrega las causas propias, los favoritos,
 dejar nota, los escritos presentados, las notificaciones electrónicas, los DEOX,
 la Guía judicial y el acceso a las demás aplicaciones del PJN, en la misma
 interfaz.
 
 ## Qué hace
 
-Una ventana que **se inicia minimizada** (queda el indicador **SuPJN+** en el
-extremo inferior derecho) y mientras tanto **lee las causas por sí sola**, en
-segundo plano. Se puede **desplazar** arrastrando la barra azul, **redimensionar**
+Una ventana que **se abre sola al entrar al PJN**, **ocupando toda la
+pantalla**, y que mientras tanto **lee las causas por sí sola**, en segundo
+plano. Con el botón de maximizar se la puede restaurar a su tamaño anterior, y
+la próxima vez que se abra vuelve a ocuparla entera. Minimizada queda como
+indicador **SuPJN+** en el extremo inferior derecho.
+Se puede **desplazar** arrastrando la barra azul, **redimensionar**
 desde la esquina inferior derecha, **acercar o alejar** con los botones − 100% +
 de la barra azul, y **minimizar, maximizar o cerrar**. Si ocurre algo mientras
 está minimizada, el indicador se pone **rojo** y señala que hay un aviso.
+
+**Vuelve donde estaba.** El PJN recarga la página entera cada vez que se abre
+una causa, se deja una nota o se pulsa Recargar. SuPJN+ anota la solapa, la
+página, la causa desplegada y hasta dónde estaba corrida la pantalla, y al
+volver retoma ese punto en lugar de empezar de arriba. Lo anotado es de esa
+pestaña, dura una hora y no sale de la PC.
 
 ### Mis causas y Favoritos
 
@@ -24,6 +33,11 @@ está minimizada, el indicador se pone **rojo** y señala que hay un aviso.
   viendo.
 - Una sola tabla con **búsqueda** sobre todos los campos y **filtros** por
   fuero, situación, trámite, etiqueta y rango de fechas de la última actuación.
+- **Los filtros puestos se avisan arriba.** En el mismo renglón que dice cuántas
+  causas hay aparece, en ámbar, *"mostrando 10 de 232 · hay un filtro puesto:
+  novedades"*, con el botón **Quitar los filtros** al lado. Los filtros quedan
+  guardados de una sesión a la otra, de modo que la lista puede abrirse ya
+  filtrada; el aviso está para que eso no se confunda con una lista incompleta.
 - **Ordena** por cualquier columna. Las **columnas se reubican** arrastrando el
   título, se **ensanchan** arrastrando el borde y se **ocultan**.
 - **Orden PJN** las muestra en la misma secuencia que el sitio: al leer, SuPJN+
@@ -48,7 +62,8 @@ está minimizada, el indicador se pone **rojo** y señala que hay un aviso.
   marcada al abrirla, o con **Marcar todo como visto**. La primera lectura es la
   línea de partida: allí no hay novedades.
 - **Etiquetas** con color y **anotaciones** propias sobre cada causa. Las
-  anotaciones son notas privadas de trabajo y no guardan relación con dejar nota.
+  anotaciones son privadas y de trabajo, y no se escriben en el expediente: no
+  guardan relación con dejar nota.
 - Una columna **Partes** con el rol al frente: "Actora: A · Demandada: B". Cuando
   la carátula no contiene "C/", indica **Causante** en las sucesiones e
   **Imputado** en el fuero penal. Se obtiene de la carátula del PJN, que es lo
@@ -63,22 +78,25 @@ está minimizada, el indicador se pone **rojo** y señala que hay un aviso.
   **seleccionadas** en Mis causas o en Favoritos.
 - La solapa **advierte antes**, no después: al entrar ya informa cuántas causas
   entran, cuáles tienen nota de ese día y cuáles no están en Mis causas. El
-  botón es el definitivo y arranca la tanda, sin un paso intermedio de
+  botón es el definitivo e inicia el lote, sin un paso intermedio de
   confirmación. La operación se realiza en la lista de Relacionados del PJN; la
   página se recarga una vez por nota y el avance se informa en la ventana.
+- En las listas de la solapa, las seleccionadas y las notas del día, el
+  **número y la carátula abren el expediente en una pestaña nueva**, para poder
+  constatar la nota sin perder la lista.
 - Cada nota queda con su resultado: **dejada**, **a verificar** (el PJN no
   respondió y corresponde constatarlo en el expediente) o **no salió**. Nunca se
   da por dejada una nota que el PJN no confirmó **para esa causa**: un incidente
   no vale por su expediente principal. Una nota ya dejada no se sobrescribe: si
-  la causa se incluye en otra tanda y el PJN ya no le asigna lápiz, se informa y
+  la causa se incluye en otro lote y el PJN ya no le asigna lápiz, se informa y
   se conserva el resultado válido.
-- Si se abandona la lista de Relacionados, la tanda **queda en pausa** y espera
+- Si se abandona la lista de Relacionados, el lote **queda en pausa** y espera
   mientras esa pestaña siga abierta: continúa al regresar, sin límite de tiempo.
   Mientras está en curso no se descarga nada ni se abren causas, para que las
   recargas del PJN no interrumpan una descarga.
-- La tanda pertenece a **una sola pestaña**: si se abre otra, o se duplica la que
+- El lote pertenece a **una sola pestaña**: si se abre otra, o se duplica la que
   está trabajando, la segunda informa que no la retoma y ninguna nota se deja dos
-  veces. Una tanda de una pestaña cerrada no se retoma automáticamente.
+  veces. Un lote de una pestaña cerrada no se retoma automáticamente.
 
 ### Descarga de expedientes
 
@@ -137,10 +155,20 @@ En las tres se elige la bandeja y el rango de fechas (de manera predeterminada,
 los últimos 60 días en Escritos, los últimos 30 en Notificaciones y el último
 año en DEOX) y se pulsa **Consultar**; la primera vez se consulta sola. Sobre lo
 leído hay un **buscador**, las columnas se **ordenan** pulsando el título y la
-lista se pagina de a 50. Cada fila tiene **Ver** (el PDF en una pestaña nueva),
-**⇩** (descargarlo con nombre propio), **✉** (dejar cédula en esa causa, ver más
-abajo) y **↗** (abrir el expediente en la Consulta Web, en una pestaña nueva). Las causas que están en Mis causas o en Favoritos
-muestran sus etiquetas.
+lista se pagina de a 50.
+
+**La barra de Escritos** tiene además **atajos de fechas** (últimos 7, 30 o 60
+días y este año, que ponen las fechas y consultan) y cuatro **filtros sobre lo
+ya consultado**: **fuero**, **estado**, **dependencia** y **etiqueta de la
+causa**. Cada uno ofrece solamente los valores que aparecen en lo consultado, se
+combinan entre sí, con el buscador y con el orden, y no le piden nada más al
+PJN. Si en una consulta nueva no aparece lo que estaba elegido, ese filtro se
+quita solo. En la vista de una sola causa no se muestran, porque ahí no hacen falta.
+
+Cada fila tiene **Ver** (el PDF en una pestaña nueva), **⇩** (descargarlo con
+nombre propio), **✉** (dejar cédula en esa causa, ver más abajo) y **↗** (abrir
+el expediente en la Consulta Web, en una pestaña nueva). Las causas que están en
+Mis causas o en Favoritos muestran sus etiquetas.
 
 **Por causa:** el menú **⋯** de una causa, y los botones del expediente abierto,
 llevan a los escritos, las notificaciones o los DEOX **de esa causa, de
@@ -154,7 +182,7 @@ ya iniciada, y les pide la información desde ahí. Antes de mostrar nada
 Consulta Web: si no lo es, no muestra nada y lo informa. Solo lee: no presenta,
 no archiva ni borra nada, y la conexión con esas aplicaciones solo admite una
 lista cerrada de consultas de lectura. Lo consultado queda en memoria mientras
-la página esté abierta y **no se guarda en el equipo**.
+la página esté abierta y **no se guarda en la PC**.
 
 Si la sesión de alguna de esas aplicaciones venció, la ventana lo informa:
 alcanza con abrirla desde **Funciones del PJN**, ingresar si lo pide y volver a
@@ -178,6 +206,20 @@ Notificaciones del PJN y deja el resto en ese formulario.
   texto y el envío. SuPJN+ no pulsa Guardar ni Enviar.
 - **Si el PJN no ofrece la causa:** el sistema solo ofrece las causas en las que
   el letrado constituyó domicilio electrónico. En ese caso el cartel lo dice.
+- **Cómo elige la jurisdicción:** el PJN no manda las jurisdicciones con la
+  página: las pide a su servidor **cada vez que la lista se abre**, y tardan
+  alrededor de un segundo. Además, cada clic en el campo abre o cierra la lista,
+  y cerrarla cancela esa espera. Por eso SuPJN+ mira primero cómo está el campo:
+  si ya está abierto lo usa, solo si está cerrado prueba las formas conocidas de
+  abrirlo, de a una, y si se abrió y todavía no trajo nada **la espera con la
+  lista abierta** en vez de cerrarla. La opción se reconoce **por la sigla**,
+  nunca por el nombre: "Civil" también está adentro de "Civil y Comercial
+  Federal", y si dos opciones trajeran la misma sigla no se elige ninguna.
+- **Si igual no se puede elegir la jurisdicción:** SuPJN+ **carga el número y el
+  año** y el cartel dice cuál de las cinco cosas pasó (no se mostró la lista, se
+  mostró vacía, no trae la sigla, trae más de una, o estaba y el formulario no
+  la tomó), en vez de dejar el formulario vacío sin explicación. Nunca da por
+  elegida una jurisdicción que no quedó cargada en el campo.
 - **Misma cuenta:** si Notificaciones está abierto con otra cuenta que la de la
   Consulta Web, no se carga nada y se avisa.
 - El pedido vale cinco minutos y se usa una sola vez. Si Notificaciones pide
@@ -220,33 +262,35 @@ menú **⋯** ofrece abrir en esta pestaña o en una nueva, **libro digital** y
 **presentar escrito**.
 
 Ese mismo menú incluye **Cerrar sesión del PJN**, para usar al terminar. No
-cierra si hay una tanda de nota o descargas en curso: primero avisa, porque eso
+cierra si hay un lote de notas o descargas en curso: primero avisa, porque eso
 sí se perdería.
 
 ### La sesión mientras se trabaja
 
-El PJN cierra la sesión por inactividad, y eso corta una tanda de nota o una
-descarga por la mitad. Mientras se está trabajando, SuPJN+ le toca la sesión al
+El PJN cierra la sesión por inactividad, y eso corta un lote de notas o una
+descarga por la mitad. Mientras se está trabajando, SuPJN+ renueva la sesión del
 sitio cada pocos minutos para que no caduque.
 
 Lo hace **solo si hay alguien trabajando**: actividad reciente en la pantalla, o
-un trabajo en curso. Si el equipo queda desatendido, el refresco se detiene y la
+un trabajo en curso. Si la PC queda desatendida, el refresco se detiene y la
 sesión caduca como siempre. Es deliberado: una sesión que no caduca nunca queda
-a mano de cualquiera que se siente frente a la máquina, que es exactamente lo que
+a mano de cualquiera que se siente frente a la PC, que es exactamente lo que
 se busca evitar.
 
 ## Cómo se usa
 
-1. Ingresar a **scw.pjn.gov.ar** con el usuario propio.
-2. En el **Portal del PJN** (portalpjn.pjn.gov.ar) el indicador aparece apenas se
-   ingresa: al pulsarlo conduce a la Consulta Web con SuPJN+ en funcionamiento.
-3. **SuPJN+** se inicia minimizado y lee las causas y los favoritos en segundo
-   plano. El indicador del extremo inferior derecho informa el avance; al
-   pulsarlo se abre la ventana. Las listas se releen automáticamente cuando han
-   pasado más de 10 minutos, o al pulsar **Actualizar**.
-4. Si quedó una tanda de **dejar nota** sin terminar, la ventana sí se despliega
-   por sí sola, para poder continuarla o cancelarla.
-5. El botón **Recargar** de la barra azul vuelve a cargar la página del PJN e
+1. Ingresar al **Portal del PJN** (portalpjn.pjn.gov.ar) con el usuario propio.
+   El indicador de SuPJN+ aparece apenas se ingresa: al pulsarlo conduce a la
+   Consulta Web con SuPJN+ en funcionamiento. Con la sesión ya iniciada, también
+   funciona al abrir directamente la Consulta Web (scw.pjn.gov.ar).
+2. En la Consulta Web, **SuPJN+** se abre solo, ocupando toda la pantalla, y lee
+   las causas y los favoritos en segundo plano. Minimizado, el indicador del
+   extremo inferior derecho informa el avance; al pulsarlo se vuelve a abrir la
+   ventana. Las listas se releen automáticamente cuando han pasado más de 10
+   minutos, o al pulsar **Actualizar**.
+3. Si quedó un lote de **dejar nota** sin terminar, la ventana lo informa al
+   abrirse, para poder continuarlo o cancelarlo.
+4. El botón **Recargar** de la barra azul vuelve a cargar la página del PJN e
    inicia SuPJN+ desde cero. Si hay trabajo en curso, solicita confirmación.
 
 Si la sesión del PJN vence, la ventana lo advierte: corresponde recargar la
@@ -258,11 +302,18 @@ tiene causas en una lista, la ventana lo informa en lugar de quedar en blanco.
 SuPJN+ depende de la estructura de la página del PJN. En **Acerca de** hay un
 botón **Revisar el PJN**: examina, en segundo plano y sin dejar notas ni
 modificar nada, las piezas que SuPJN+ necesita (la tabla de causas, el paginador,
-el enlace para abrir, la función de dejar nota, Escritos, Notificaciones, DEOX,
-la Guía judicial, la tabla de actuaciones y un PDF) e informa cuáles siguen en
+el enlace para abrir, la cuenta del encabezado, la función de dejar nota, las
+solapas del expediente, Escritos, Notificaciones, DEOX, la Guía judicial, la
+tabla de actuaciones y un PDF) e informa cuáles siguen en
 su lugar y cuáles cambiaron. Genera un informe para
 copiar y remitir a quien mantiene SuPJN+: **no incluye números de causa ni datos
 personales**.
+
+Del lado del código, todo lo que depende de cómo está hecho el sitio (las
+direcciones, los textos que se buscan, los nombres de los elementos y los campos
+de los formularios) está reunido en un solo bloque al comienzo del archivo, **el
+mapa del PJN**. Cuando el PJN cambia algo, ese es el único lugar que hay que
+mirar, y la revisión comprueba esas piezas una por una.
 
 ### Registro de fallas de descarga
 
@@ -289,7 +340,7 @@ remitirse sin revelar de qué causa se trata.
 ## Los datos y el respaldo
 
 Las listas leídas, las etiquetas, las anotaciones, el resultado de dejar nota y
-el registro de fallas se guardan **únicamente en este equipo**, en el almacén de
+el registro de fallas se guardan **únicamente en esta PC**, en el almacén de
 Tampermonkey. No se envían a ningún servidor y no se escriben en el PJN. Lo que
 se consulta en Escritos, Notificaciones, DEOX y la Guía no se guarda: dura
 mientras la página esté abierta.
@@ -299,30 +350,30 @@ navegador y no a la sesión del PJN, y además se comparte con las ventanas de
 incógnito. Por eso SuPJN+ lee de la barra de usuario del sitio con qué cuenta se
 ingresó y guarda los datos de cada cuenta por separado: **con una cuenta no se
 accede a nada de la otra**, ni causas, ni etiquetas, ni anotaciones, ni el
-registro de dejar nota. La barra azul indica siempre con qué cuenta se está
+registro de notas. La barra azul indica siempre con qué cuenta se está
 trabajando. Si no puede identificarla, lo informa y no guarda nada ni muestra lo
-guardado, para no mezclar datos de dos cuentas. Una tanda de dejar nota iniciada
-con una cuenta no se retoma con otra.
+guardado, para no mezclar datos de dos cuentas. Un lote de notas iniciado con
+una cuenta no se retoma con otra.
 
 La configuración de la ventana (columnas, anchos, orden) es común a todas las
 cuentas, porque no constituye información de causas. El texto escrito en el
 buscador no se guarda: puede ser el nombre de un cliente.
 
-Las **anotaciones** son notas privadas de trabajo: no guardan relación con dejar
-nota en el expediente.
+Las **anotaciones** son privadas y de trabajo: no se escriben en el expediente
+y no guardan relación con dejar nota.
 
 Hay dos formas de respaldar, en la solapa **Respaldo**:
 
 - **Una carpeta designada por el usuario.** Con **Elegir carpeta**, SuPJN+ escribe
   allí un archivo por cuenta (`SuPJN+-datos-<cuenta>.supjn`) con las etiquetas,
-  las anotaciones y el registro de dejar nota, cada vez que algo cambia, y lo lee
+  las anotaciones y el registro de notas, cada vez que algo cambia, y lo lee
   al abrir. Solo importa el archivo de la cuenta con la que se ingresó. Con la
-  carpeta sincronizada (OneDrive o Drive) sirve para trabajar en dos equipos.
+  carpeta sincronizada (OneDrive o Drive) sirve para trabajar en dos PC.
   **Desde la 0.7.1 ese archivo va cifrado**, con la misma contraseña y el mismo
   formato que la copia manual (ver más abajo): en el uso diario no se pide
   nada. Sin contraseña puesta, SuPJN+ no escribe en la carpeta y lo avisa en la
   barra de la lista. En la otra PC hay que poner la misma contraseña una vez;
-  hasta entonces SuPJN+ no lee ni pisa el respaldo de la carpeta. Si se cambió
+  hasta entonces SuPJN+ no lee ni sobrescribe el respaldo de la carpeta. Si se cambió
   la contraseña a propósito, hay un botón para reemplazar el respaldo de la
   carpeta con los datos de esa PC. El archivo en claro de las versiones
   anteriores (`.json`) se lee una vez y se borra cuando ya quedó escrito el
@@ -335,21 +386,21 @@ Hay dos formas de respaldar, en la solapa **Respaldo**:
   formato propio (`.supjn`) y cifrado con una contraseña del usuario. No se abre
   con un editor de texto, no lo leen los indexadores de escritorio ni de la
   nube, y sin la contraseña no se recupera en ninguna parte. La contraseña se
-  pone una sola vez, en la solapa **Respaldo**, y queda en ese equipo: allí no
+  pone una sola vez, en la solapa **Respaldo**, y queda en esa PC: allí no
   se la vuelve a pedir, ni para exportar ni para importar. Al importar el
-  archivo en otra máquina sí hay que escribirla. La ventana muestra la fecha de
+  archivo en otra PC sí hay que escribirla. La ventana muestra la fecha de
   la última copia y la señala en rojo cuando han transcurrido más de 15 días.
 
-  Lo que se protege es el archivo cuando sale del equipo, que es donde queda
+  Lo que se protege es el archivo cuando sale de la PC, que es donde queda
   fuera de control: en una carpeta sincronizada, en un pendrive o adjunto en un
-  correo. Lo guardado dentro del equipo sigue como está, detrás de la sesión de
+  correo. Lo guardado dentro de la PC sigue como está, detrás de la sesión de
   Windows.
 
-Para trasladar los datos a otro equipo, **Importar**. No elimina nada: suma las
+Para trasladar los datos a otra PC, **Importar**. No elimina nada: suma las
 etiquetas faltantes y de cada causa conserva lo más reciente (la anotación más
 nueva si ambas copias tienen fecha, y los dos textos si alguna proviene de una
 copia anterior sin fecha), más el resultado de dejar nota más reciente. Una
-anotación **eliminada** en un equipo no se elimina en el otro: si el otro todavía
+anotación **eliminada** en una PC no se elimina en la otra: si la otra todavía
 la conserva, reaparece. Es deliberado, para no perder texto involuntariamente.
 
 ## Instalación
@@ -357,7 +408,7 @@ la conserva, reaparece. Es deliberado, para no perder texto involuntariamente.
 1. Contar con [Tampermonkey](https://www.tampermonkey.net/) instalado en Chrome o
    Edge.
 2. Abrir el enlace de instalación:
-   **[Instalar supjn-plus.user.js](https://raw.githubusercontent.com/Elzas85/SUPJNPLUS/main/supjn-plus.user.js)**
+   **[Instalar supjn-plus.user.js](https://raw.githubusercontent.com/Elzas85/SuPJNPLUS/main/supjn-plus.user.js)**
 3. Tampermonkey muestra la pantalla de instalación. Pulsar *Instalar*.
 
 **Importante:** SuPJN+ ya incorpora la totalidad de **PJN+** y de **NOTATOMIC**.
@@ -375,15 +426,10 @@ al actualizar, hay que aceptarlos.
 
 ## En el teléfono
 
-**SuPJN+ para Android es una aplicación aparte**, en su propia carpeta
-(`SuPJN+ Android`), con su propio número de versión y su propia documentación.
-Lo que se instala en la computadora y lo que se instala en el teléfono no
-dependen uno del otro: cambiar este userscript no obliga a tocar la aplicación,
-y al revés tampoco.
-
-El programa que hace el trabajo es el mismo. La aplicación lo arma tomando este
-archivo y agregándole lo que Android necesita, de modo que no hay dos copias que
-puedan separarse sin que nadie se entere.
+La versión para Android es **SuPJN Lite**, un producto aparte, con su propia
+carpeta, su propio número de versión y su propia documentación. No es una
+versión de este userscript ni se arma a partir de él: SuPJN+ funciona en el
+navegador de la computadora y SuPJN Lite en Android.
 
 ## Autor
 
