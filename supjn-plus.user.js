@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SuPJN+ - Consulta Web del PJN ampliada
 // @namespace    ignacio.kinbaum
-// @version      1.3.5
+// @version      1.4.1
 // @description  Ventana única sobre la Consulta Web del PJN: Mis causas y Favoritos, en trámite y fuera de trámite, con búsqueda, filtros, ordenamiento y columnas configurables; etiquetas y anotaciones propias, con copia manual o guardado automático en una carpeta designada; dejar nota en todas las causas habilitadas o en las seleccionadas; descarga de expedientes en PDF eligiendo causas desde la lista o actuaciones desde el expediente; escritos presentados, notificaciones electrónicas y DEOX, generales o de una causa, con sus PDF; dejar cédula con el expediente ya cargado en el formulario del PJN; la Guía judicial navegable y enlazada a cada causa; y acceso a las demás aplicaciones del PJN.
 // @author       Ignacio Kinbaum
 // @license      GPL-3.0-or-later
@@ -270,7 +270,7 @@
       menuMovil: '.navbar-collapse, .dropdown-menu, .offcanvas, [class*="menu-usuario"], [id*="menu"], [class*="navbar-nav"]'
     },
     // Cómo se reconoce que la sesión venció: el PJN contesta la pantalla de ingreso.
-    ingreso: /type=["\']?password/i,
+    ingreso: /type=["']?password/i,
     // Las otras solapas del expediente, por el texto de su cabecera, y dónde
     // el PJN pone esas cabeceras (el identificador lo arma JSF).
     solapasExp: { int: 'Intervinientes', vin: 'Vinculados', rec: 'Recursos' },
@@ -405,7 +405,7 @@
     }
 
     const aJSON = async (r) => {
-      try { return await r.json(); } catch (e) { throw new Error('la respuesta no se pudo leer'); }
+      try { return await r.json(); } catch (e) { throw new Error('la respuesta no se pudo leer', { cause: e }); }
     };
 
     async function atender(p) {
@@ -559,7 +559,7 @@
     const esperarQue = async (f, msMax) => {
       const tope = Date.now() + msMax;
       for (;;) {
-        let v = null;
+        let v;
         try { v = f(); } catch (e) { v = null; }
         if (v) return v;
         if (Date.now() >= tope) return null;
@@ -651,8 +651,8 @@
         return 'elegida';
       }
 
-      const opciones = () => document.querySelectorAll(PJN.cedula.opcion).length;
-      const abierta = () => cam.getAttribute('aria-expanded') === 'true' || opciones() > 0;
+      const cuantasOpciones = () => document.querySelectorAll(PJN.cedula.opcion).length;
+      const abierta = () => cam.getAttribute('aria-expanded') === 'true' || cuantasOpciones() > 0;
       const cerrar = async () => {
         cam.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
         await esperarQue(() => (abierta() ? null : true), 1000);
@@ -701,12 +701,12 @@
         }
         // Se espera la lista, haya o no una opción con la sigla: así se
         // distingue "no se abre" de "se abre pero ya no trae la sigla".
-        let hay = await esperarQue(() => (opciones() ? true : null), 2500);
+        let hay = await esperarQue(() => (cuantasOpciones() ? true : null), 2500);
         // Si se abrió y quedó vacía, se le da más tiempo antes de cerrarla: las
         // jurisdicciones las trae el PJN por su cuenta y a veces tardan.
         if (!hay && abierta()) {
           vioVacia = true;
-          hay = await esperarQue(() => (opciones() ? true : null), 8000);
+          hay = await esperarQue(() => (cuantasOpciones() ? true : null), 8000);
         }
         if (!hay) { await cerrar(); continue; }
         vioLista = true;
@@ -792,7 +792,7 @@
             : 'Elegí ' + p.sigla + ' manualmente y pulsá Siguiente.'), true);
         return;
       }
-      let r = '';
+      let r;
       try { r = await elegirExpediente(); } catch (e) { r = ''; }
       const sigue = ' Pulsá Siguiente para completar los destinatarios, los despachos y el texto. La cédula se envía desde este formulario: SuPJN+ no envía nada.';
       if (r === 'elegida') cartel('se eligió ' + buscado + '.' + sigue);
@@ -804,7 +804,7 @@
 
   const APP_PUENTE = APPS_PUENTE[location.hostname];
   if (APP_PUENTE) {
-    let deLaConsulta = false;
+    let deLaConsulta;
     try {
       // En Chrome, ancestorOrigins dice quién abrió el marco. Aunque faltara, el
       // puente igual solo le contesta a la Consulta Web.
@@ -956,6 +956,55 @@
     return 'hace ' + plural(Math.round(h / 24), 'día', 'días');
   }
   const hoyISO = () => { const d = new Date(); return d.getFullYear() + '-' + dos(d.getMonth() + 1) + '-' + dos(d.getDate()); };
+
+  // ---------------------------------------------------------------- campos de fecha (1.3.9)
+  // Las fechas se escriben como dd/mm/aaaa en un campo de texto: las barras
+  // se ponen solas y el año puede ir con dos cifras (26 = 2026). Por dentro
+  // se guardan como aaaa-mm-dd. Reemplaza al campo de fecha del navegador,
+  // que al escribir el año se volvía al día (25/09/2026).
+  const textoDesdeISO = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); return m ? m[3] + '/' + m[2] + '/' + m[1] : ''; };
+  // Fecha en aaaa-mm-dd a partir de lo escrito; '' si está vacío; null si no es una fecha entera y válida.
+  function isoDesdeTexto(txt, admiteAnioCorto) {
+    const d = String(txt || '').replace(/\D/g, '');
+    if (!d) return '';
+    if (d.length !== 8 && !(admiteAnioCorto && d.length === 6)) return null;
+    const dia = +d.slice(0, 2), mes = +d.slice(2, 4);
+    const anio = d.length === 8 ? +d.slice(4) : 2000 + +d.slice(4);
+    const f = new Date(anio, mes - 1, dia);
+    if (anio < 1900 || f.getFullYear() !== anio || f.getMonth() !== mes - 1 || f.getDate() !== dia) return null;
+    return anio + '-' + dos(mes) + '-' + dos(dia);
+  }
+  const esCampoFecha = (el) => !!(el && el.classList && el.classList.contains('sj-fecha'));
+  const campoFecha = (atributos, iso, titulo) => '<input type="text" class="sj-fecha" ' + atributos + ' inputmode="numeric" maxlength="10" placeholder="dd/mm/aaaa" title="' + esc(titulo || 'Fecha como dd/mm/aaaa') + '" value="' + esc(textoDesdeISO(iso)) + '">';
+  // Pone las barras a medida que se escribe (solo se aceptan cifras).
+  function ordenarCampoFecha(input) {
+    const d = input.value.replace(/\D/g, '').slice(0, 8);
+    let t = d.slice(0, 2);
+    if (d.length > 2) t += '/' + d.slice(2, 4);
+    if (d.length > 4) t += '/' + d.slice(4);
+    if (t !== input.value) input.value = t;
+    return d;
+  }
+  // Valor del campo para guardar: '' vacío, aaaa-mm-dd si la fecha está
+  // entera, null si está a medio escribir o mal (en rojo).
+  function valorDeCampoFecha(input) {
+    const d = ordenarCampoFecha(input);
+    const iso = d.length === 8 ? isoDesdeTexto(d) : (d ? null : '');
+    input.classList.toggle('mal', d.length === 8 && iso === null);
+    return iso;
+  }
+  const valorDeCampo = (input) => (esCampoFecha(input) ? valorDeCampoFecha(input) : input.value);
+  // Al salir del campo, un año de dos cifras se completa (26 = 2026) y se avisa al resto.
+  function alSalirDeCampoFecha(e) {
+    const input = e.target;
+    if (!esCampoFecha(input)) return;
+    const d = input.value.replace(/\D/g, '');
+    if (d.length !== 6) return;
+    const iso = isoDesdeTexto(d, true);
+    input.value = iso ? textoDesdeISO(iso) : input.value;
+    input.classList.toggle('mal', !iso);
+    if (iso) input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
   // Con la fecha local: en UTC, después de las 21 el archivo salía con la de mañana.
   const selloArchivo = () => hoyISO();
   const isoACorta = (iso) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); return m ? m[3] + '/' + m[2] : ''; };
@@ -1353,7 +1402,7 @@
       const fin = (v) => { if (hecho) return; hecho = true; obs.disconnect(); clearTimeout(vence); resolve(v); };
       const obs = new MutationObserver(() => { try { if (listo()) fin(true); } catch (e) { /* el DOM se está rearmando */ } });
       obs.observe(doc.documentElement, { childList: true, subtree: true, characterData: true });
-      const vence = setTimeout(() => { let v = false; try { v = listo(); } catch (e) { v = false; } fin(v); }, ms);
+      const vence = setTimeout(() => { let v; try { v = listo(); } catch (e) { v = false; } fin(v); }, ms);
     });
   }
 
@@ -1399,7 +1448,7 @@
   // El PJN puede resolverlo de tres formas: enviando el formulario (ahí se repite
   // el pedido por fetch, como con las demás acciones), navegando la página, o por
   // ajax. Las tres se esperan igual: hasta que la lista sea otra.
-  async function ordenarPorFecha(fr, avisar) {
+  async function ordenarPorFecha(fr, informar) {
     const o = selectorOrden(fr.contentDocument);
     if (!o || !o.boton) return false;
     const puesto = () => {
@@ -1409,7 +1458,7 @@
       return !!op && /^fecha$/i.test(limpio(op.textContent) || limpio(op.value));
     };
     if (puesto()) return false;
-    avisar('Pidiendo al PJN la lista ordenada por fecha...');
+    informar('Pidiendo al PJN la lista ordenada por fecha...');
     // Advertencia: al elegir FECHA en el desplegable, el propio control ya "queda puesto",
     // así que eso no sirve para saber si el PJN contestó. Lo que se espera es otro
     // documento (si navega) o otras filas (si lo resuelve por ajax).
@@ -1533,7 +1582,7 @@
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       });
     } catch (e) {
-      throw new Error('el PJN no respondió (si la sesión venció, recargá la página)');
+      throw new Error('el PJN no respondió (si la sesión venció, recargá la página)', { cause: e });
     }
     if (!r.ok) throw new Error('el PJN respondió con error ' + r.status);
     try { await r.text(); } catch (e) { /* solo interesa la dirección */ }
@@ -1544,7 +1593,7 @@
 
   let cancelarLectura = false;
 
-  async function recorrerLista(fr, que, avisar) {
+  async function recorrerLista(fr, que, informar) {
     const doc = fr.contentDocument;
     if (paginaActiva(doc) !== 1 && !(await irAPagina(doc, 1))) throw new Error('no se pudo volver a la primera página');
     const out = [];
@@ -1560,7 +1609,7 @@
         // es la única forma de desempatar igual que él.
         out.push({ exp: f.exp, dep: f.dep, car: f.car, sit: f.sit, ult: f.ult, fav: f.fav, pag, pos: out.length });
       });
-      avisar('Leyendo ' + que + ': página ' + pag + ' (' + plural(out.length, 'causa', 'causas') + ')');
+      informar('Leyendo ' + que + ': página ' + pag + ' (' + plural(out.length, 'causa', 'causas') + ')');
       const sig = enlaceSiguiente(doc);
       if (!sig) break;
       const fAntes = firmaLista(doc);
@@ -1572,31 +1621,31 @@
 
   // Lee una lista entera: primero lo que está en trámite y después, con "Ver
   // todos los expedientes", lo que está fuera de trámite.
-  async function leerLista(tipo, avisar) {
+  async function leerLista(tipo, informar) {
     const L = LISTAS[tipo];
     const fr = crearMarco();
     try {
-      avisar('Abriendo ' + L.pjn + ' en segundo plano...');
+      informar('Abriendo ' + L.pjn + ' en segundo plano...');
       await esperarCarga(fr, () => { fr.src = RUTA[tipo]; }, esLista);
       if (tipoLista(fr.contentDocument) !== tipo) throw new Error('el PJN no devolvió la lista de ' + L.pjn);
       const casilla0 = casillaVerTodos(fr.contentDocument);
       if (casilla0 && casilla0.checked) throw new Error('la lista de ' + L.pjn + ' llegó con la casilla "Ver todos" marcada');
       // Primero, que el PJN la ordene por fecha: así el orden que se guarda es el
       // mismo que se ve en el sitio, con la hora adentro.
-      try { await ordenarPorFecha(fr, avisar); } catch (e) { /* si no se puede, se lee igual */ }
-      const tramite = await recorrerLista(fr, L.nombre + ' en trámite', avisar);
+      try { await ordenarPorFecha(fr, informar); } catch (e) { /* si no se puede, se lee igual */ }
+      const tramite = await recorrerLista(fr, L.nombre + ' en trámite', informar);
 
       const casilla = casillaVerTodos(fr.contentDocument);
       const consultar = botonConsultar(fr.contentDocument);
       let todas = null;
       if (casilla && consultar) {
         if (cancelarLectura) throw new Error('cancelado');
-        avisar('Pidiendo también las causas fuera de trámite de ' + L.pjn + '...');
+        informar('Pidiendo también las causas fuera de trámite de ' + L.pjn + '...');
         await esperarCarga(fr, () => { casilla.checked = true; consultar.click(); }, esLista);
         const casilla2 = casillaVerTodos(fr.contentDocument);
         if (!casilla2 || !casilla2.checked) throw new Error('el PJN no tomó "Ver todos los expedientes"');
-        try { await ordenarPorFecha(fr, avisar); } catch (e) { /* si no se puede, se lee igual */ }
-        todas = await recorrerLista(fr, L.nombre + ' fuera de trámite', avisar);
+        try { await ordenarPorFecha(fr, informar); } catch (e) { /* si no se puede, se lee igual */ }
+        todas = await recorrerLista(fr, L.nombre + ' fuera de trámite', informar);
       }
 
       const deTramite = {};
@@ -1655,19 +1704,19 @@
     MT.fr = null; MT.tipo = null; MT.todas = false; MT.ts = 0;
   }
 
-  async function marcoLista(tipo, todas, avisar) {
+  async function marcoLista(tipo, todas, informar) {
     if (marcoVivo(tipo, todas)) return MT.fr;
     soltarMarcoTrabajo();
     const fr = crearMarco();
     MT.fr = fr;
-    avisar('Abriendo ' + LISTAS[tipo].pjn + ' en segundo plano...');
+    informar('Abriendo ' + LISTAS[tipo].pjn + ' en segundo plano...');
     await esperarCarga(fr, () => { fr.src = RUTA[tipo]; }, esLista);
     if (tipoLista(fr.contentDocument) !== tipo) throw new Error('el PJN no devolvió la lista de ' + LISTAS[tipo].pjn);
     if (todas) {
       const casilla = casillaVerTodos(fr.contentDocument);
       const consultar = botonConsultar(fr.contentDocument);
       if (casilla && consultar && !casilla.checked) {
-        avisar('Pidiendo las causas fuera de trámite...');
+        informar('Pidiendo las causas fuera de trámite...');
         await esperarCarga(fr, () => { casilla.checked = true; consultar.click(); }, esLista);
       }
     }
@@ -1677,12 +1726,12 @@
 
   const filaEn = (doc, k) => (filasDe(doc).find((f) => f.exp === k) || {}).tr || null;
 
-  async function buscarFila(fr, dc, todas, avisar) {
+  async function buscarFila(fr, dc, todas, informar) {
     const doc = fr.contentDocument;
     const esperada = todas ? (dc.pagTodas || dc.pagTramite) : (dc.pagTramite || dc.pagTodas);
     let tr = filaEn(doc, dc.exp);
     if (!tr && esperada) {
-      avisar('Buscando ' + dc.exp + ' en la página ' + esperada + '...');
+      informar('Buscando ' + dc.exp + ' en la página ' + esperada + '...');
       if (await irAPagina(doc, esperada)) tr = filaEn(doc, dc.exp);
     }
     if (!tr && (await irAPagina(doc, 1))) {
@@ -1692,7 +1741,7 @@
         const sig = enlaceSiguiente(doc);
         if (!sig) break;
         const pag = paginaActiva(doc), f = firmaLista(doc);
-        avisar('Buscando ' + dc.exp + ': página ' + (pag + 1) + '...');
+        informar('Buscando ' + dc.exp + ': página ' + (pag + 1) + '...');
         sig.click();
         if (!(await esperarCambio(doc, pag, f, 25000))) break;
       }
@@ -1702,14 +1751,14 @@
 
   // Devuelve { fr, tr, tipo } con la fila de la causa en una lista del PJN.
   // soloRel: para lo que solo existe en Relacionados (presentar escrito).
-  async function ubicarCausa(k, avisar, soloRel) {
+  async function ubicarCausa(k, informar, soloRel) {
     const tipos = (VISTA === 'fav' ? ['fav', 'rel'] : ['rel', 'fav']).filter((t) => !soloRel || t === 'rel');
     for (const tipo of tipos) {
       const dc = causaEn(tipo, k);
       if (!dc) continue;
       for (let intento = 0; intento < 2; intento++) {
-        const fr = await marcoLista(tipo, !dc.tramite, avisar);
-        const tr = await buscarFila(fr, dc, !dc.tramite, avisar);
+        const fr = await marcoLista(tipo, !dc.tramite, informar);
+        const tr = await buscarFila(fr, dc, !dc.tramite, informar);
         if (tr) return { fr, tr, tipo };
         // La vista del marco puede haber vencido en el servidor: se abre de nuevo.
         soltarMarcoTrabajo();
@@ -1719,12 +1768,12 @@
   }
 
   // Abre la causa en segundo plano y devuelve la dirección del expediente.
-  function direccionDe(k, accion, avisar) {
+  function direccionDe(k, accion, informar) {
     return conMarco(async () => {
-      const u = await ubicarCausa(k, avisar, accion === 'libro');
+      const u = await ubicarCausa(k, informar, accion === 'libro');
       const a = accion === 'libro' ? enlaceMenu(u.tr, PJN.menuFila.libro) : enlaceOjo(u.tr);
       if (!a) throw new Error(accion === 'libro' ? 'la fila de ' + k + ' no tiene "Libro digital"' : 'la fila de ' + k + ' no tiene el enlace para ver el expediente');
-      avisar((accion === 'libro' ? 'Pidiendo el libro digital de ' : 'Abriendo ') + k + '...');
+      informar((accion === 'libro' ? 'Pidiendo el libro digital de ' : 'Abriendo ') + k + '...');
       let url;
       try {
         url = await postAccion(u.fr, a);
@@ -1733,7 +1782,7 @@
         soltarMarcoTrabajo();
         throw e;
       }
-      let x = null;
+      let x;
       try { x = new URL(url); } catch (e) { x = null; }
       const ok = x && x.origin === location.origin && x.searchParams.get('cid') &&
         (accion === 'libro' ? PJN.dirLibro.test(x.pathname) : PJN.dirExpediente.test(x.pathname));
@@ -1793,7 +1842,7 @@
 
   const firmaActuaciones = (doc) => filasTabla(tablaActuaciones(doc)).map((tr) => limpio(tr.textContent).slice(0, 60)).join('|');
 
-  async function recorrerActuaciones(doc, hist, avisar, cortar) {
+  async function recorrerActuaciones(doc, hist, informar, cortar) {
     if (paginaActiva(doc, tablaActuaciones) !== 1) await irAPagina(doc, 1, firmaActuaciones, tablaActuaciones);
     const out = [];
     const vistos = {};
@@ -1805,7 +1854,7 @@
         vistos[a.url] = true;
         out.push(a);
       });
-      avisar('Leyendo actuaciones' + (hist ? ' históricas' : '') + ': página ' + pag + ' (' + out.length + ' con PDF)');
+      informar('Leyendo actuaciones' + (hist ? ' históricas' : '') + ': página ' + pag + ' (' + out.length + ' con PDF)');
       const sig = enlaceSiguiente(doc, tablaActuaciones);
       if (!sig) break;
       const f = firmaActuaciones(doc);
@@ -1840,21 +1889,21 @@
 
   // Lee todas las actuaciones con PDF de un expediente, actuales e históricas,
   // en un marco oculto y a partir de su cid.
-  async function leerActuaciones(cid, avisar, cortar) {
+  async function leerActuaciones(cid, informar, cortar) {
     const fr = crearMarco();
     try {
-      avisar('Abriendo el expediente en segundo plano...');
+      informar('Abriendo el expediente en segundo plano...');
       await esperarCarga(fr, () => { fr.src = RUTA.exp + '?cid=' + encodeURIComponent(cid); }, esExpediente);
       const d1 = fr.contentDocument;
       const datos = datosExpediente(d1);
       const hayHist = tieneHistoricas(d1);
-      const actuales = await recorrerActuaciones(d1, false, avisar, cortar);
+      const actuales = await recorrerActuaciones(d1, false, informar, cortar);
       let historicas = [];
       if (hayHist) {
         if (cortar && cortar()) throw new Error('cancelado');
-        avisar('Abriendo las actuaciones históricas...');
+        informar('Abriendo las actuaciones históricas...');
         await esperarCarga(fr, () => { fr.src = RUTA.hist + '?cid=' + encodeURIComponent(cid); }, esHistoricas);
-        historicas = await recorrerActuaciones(fr.contentDocument, true, avisar, cortar);
+        historicas = await recorrerActuaciones(fr.contentDocument, true, informar, cortar);
       }
       const vistos = {};
       const todas = [];
@@ -1916,7 +1965,7 @@
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       });
     } catch (e) {
-      throw new Error('el PJN no respondió (si la sesión venció, recargá la página)');
+      throw new Error('el PJN no respondió (si la sesión venció, recargá la página)', { cause: e });
     }
     if (!r.ok) throw new Error('el PJN respondió con error ' + r.status);
     try { await r.text(); } catch (e) { /* solo interesa la dirección */ }
@@ -1951,13 +2000,13 @@
   }
 
   // Lee una solapa entera, recorriendo su paginador propio.
-  async function leerSolapaExp(cid, clave, avisar) {
-    const etiqueta = SOLAPAS_EXP[clave];
+  async function leerSolapaExp(cid, solapa, informar) {
+    const etiqueta = SOLAPAS_EXP[solapa];
     const fr = crearMarco();
     try {
-      avisar('Abriendo el expediente en segundo plano...');
+      informar('Abriendo el expediente en segundo plano...');
       await esperarCarga(fr, () => { fr.src = RUTA.exp + '?cid=' + encodeURIComponent(cid); }, esExpediente);
-      avisar('Pidiendo ' + etiqueta + ' al PJN...');
+      informar('Pidiendo ' + etiqueta + ' al PJN...');
       let p = await abrirSolapa(fr, etiqueta);
       const seLleno = p.__seLleno !== false;
       const cabs = [];
@@ -1982,7 +2031,7 @@
           vistos[k] = true;
           filas.push(c);
         });
-        avisar('Leyendo ' + etiqueta + ': ' + plural(filas.length, 'fila', 'filas'));
+        informar('Leyendo ' + etiqueta + ': ' + plural(filas.length, 'fila', 'filas'));
         const sig = enlaceSiguiente(p);
         if (!sig) break;
         const antes = firmaPanel(p);
@@ -2001,10 +2050,10 @@
   }
 
   // Abre una causa vinculada: se vuelve a pedir la solapa y se usa el ojo de su fila.
-  async function direccionVinculado(cid, exp, avisar) {
+  async function direccionVinculado(cid, exp, informar) {
     const fr = crearMarco();
     try {
-      avisar('Buscando ' + exp + ' entre los vinculados...');
+      informar('Buscando ' + exp + ' entre los vinculados...');
       await esperarCarga(fr, () => { fr.src = RUTA.exp + '?cid=' + encodeURIComponent(cid); }, esExpediente);
       let p = await abrirSolapa(fr, SOLAPAS_EXP.vin);
       for (let v = 0; v < 300; v++) {
@@ -2015,7 +2064,7 @@
         if (tr) {
           const a = enlaceOjo(tr);
           if (!a) throw new Error('la fila de ' + exp + ' no tiene el enlace para ver el expediente');
-          avisar('Abriendo ' + exp + '...');
+          informar('Abriendo ' + exp + '...');
           const url = await postAccion(fr, a);
           let x = null;
           try { x = new URL(url); } catch (e) { x = null; }
@@ -2038,8 +2087,8 @@
 
   // La última actuación con PDF de una causa, sin leer el expediente entero: el
   // PJN las trae de la más nueva a la más vieja, así que alcanza la primera página.
-  async function ultimaActuacionConPDF(k, avisar) {
-    const url = await direccionDe(k, 'ojo', avisar);
+  async function ultimaActuacionConPDF(k, informar) {
+    const url = await direccionDe(k, 'ojo', informar);
     const cid = new URL(url).searchParams.get('cid');
     const fr = crearMarco();
     try {
@@ -2126,7 +2175,6 @@
           : halladas.CreationDate.length ? mayor(halladas.CreationDate) : null;
     if (!elegida) return null;
     const d = new Date(elegida.ms);
-    const dos = (n) => String(n).padStart(2, '0');
     return {
       f: dos(d.getDate()) + '/' + dos(d.getMonth() + 1) + '/' + d.getFullYear(),
       hh: dos(d.getHours()) + ':' + dos(d.getMinutes()),
@@ -2201,8 +2249,8 @@
   }
 
   // Devuelve true si se tocó la sesión, y false si se decidió no hacerlo.
-  async function latirSesion() {
-    if (!convieneLatir()) return false;
+  function latirSesion() {
+    if (!convieneLatir()) return Promise.resolve(false);
     return tocarSesion();
   }
 
@@ -2546,18 +2594,138 @@
     return !!(p && getComputedStyle(p).display !== 'none');
   }
 
-  // exito -> "Ya se ha dejado nota con el usuario N en el expediente: 32733/1980"
-  // falla -> "No se pudo realizar la acción de dejar nota ..."
+  /* --- El cartel del PJN después de confirmar la nota ------------------------
+     Es lo único que dice si la nota quedó dejada, y de eso depende el resultado
+     que se le informa al usuario.
+
+     El PJN usa DOS carteles distintos, relevados sobre el sitio real el
+     25/09/2026, con las capturas que mandó el autor:
+
+       salió bien  ->  "Se ha dejado nota en el expediente en forma correcta.
+                        Es posible verificar dicha acción en la sección de
+                        notas del expediente"        (cartel celeste, sin número)
+
+       ya estaba   ->  "Ya se ha dejado nota con el usuario 20315088705 en el
+                        expediente: 32733/1980. No es posible realizar dicha
+                        accion mas de una vez al dia por expediente"
+                                                     (cartel rojo, con número)
+
+     Hasta la 1.3.5 solo se reconocía el segundo, y encima con una sola forma
+     exacta. Como el del éxito empieza con "Se ha dejado nota" y no con "Ya se
+     ha dejado nota", no coincidía con nada: ni con el éxito ni con la falla.
+     Resultado: TODA nota bien dejada quedaba informada como "a verificar", y
+     la única manera de que dijera "dejada" era reintentarla, que es cuando
+     aparece el cartel rojo. Es exactamente lo que informó el autor.
+
+     Lo otro que quedó a la vista: el cartel del éxito NO nombra el expediente.
+     La regla de no dar por dejada una nota que el PJN no confirmó para esa
+     causa era, con este cartel, inaplicable: el PJN nunca dice cuál. Por eso
+     ahora se distinguen dos casos, y el control se conserva donde el PJN da
+     con qué ejercerlo:
+
+       - cartel CON número: tiene que ser el de la causa que se confirmó, y eso
+         lo sigue decidiendo mismoExpediente, número por número. Un incidente
+         no vale por su expediente principal.
+       - cartel SIN número: vale para la causa que se acaba de confirmar en esa
+         misma recarga, que es la única que puede haberlo provocado, y queda
+         anotado que el PJN no nombró el expediente.
+
+     Cada pregunta, en su propia función.
+  --------------------------------------------------------------------------- */
+
+  // El PJN afirma que la causa tiene nota. Puede ser porque la acaba de dejar
+  // (cartel celeste) o porque ya la tenía (cartel rojo): el hecho que le importa
+  // al usuario es el mismo, la nota está.
+  const RE_HAY_NOTA = [
+    /se\s+ha\s+dejado\s+nota/i,
+    /ya\s+se\s+dej[óo]\s+nota/i,
+    /ya\s+(?:tiene|posee|cuenta\s+con)\s+(?:una\s+)?nota/i,
+    /nota\s+ya\s+(?:fue|hab[íi]a\s+sido)\s+dejada/i
+  ];
+  const diceQueHayNota = (t) => RE_HAY_NOTA.some((re) => re.test(t));
+
+  // El PJN no pudo hacer lo que se le pidió.
+  const RE_FALLA = /No\s+se\s+pudo\s+realizar\s+(?:la\s+)?acci/i;
+  const diceFalla = (t) => RE_FALLA.test(t);
+
+  // El tramo donde está el cartel, para no salir a buscar el número de
+  // expediente por toda la página: abajo está la tabla, llena de números.
+  // Se corta en el primer renglón, que es donde termina el cartel, con un tope
+  // por si el texto viniera todo junto.
+  const LARGO_CARTEL = 240;
+
+  function tramoDelCartel(t) {
+    for (const re of RE_HAY_NOTA.concat(RE_FALLA)) {
+      const m = re.exec(t);
+      if (!m) continue;
+      const desde = t.slice(m.index, m.index + LARGO_CARTEL);
+      const corte = desde.indexOf('\n');
+      return corte > 0 ? desde.slice(0, corte) : desde;
+    }
+    return '';
+  }
+
+  // El número entero, con el incidente si lo trae (32733/1980/1): si se cortara
+  // en dos tramos, la confirmación de un incidente se leería como la del
+  // expediente principal.
+  const RE_NUMERO_EXP = /^([^]{0,12}?)(\d+\/\d{2,4}(?:\/[A-Za-z0-9]+)*)/;
+
+  // Entre la palabra "expediente" y el número, el PJN pone a lo sumo dos
+  // puntos, un "N°" y la sigla del fuero en mayúsculas. Cualquier otra cosa
+  // quiere decir que ese número no es el del cartel: una fecha tiene la misma
+  // forma que un expediente (25/09/2026), y abajo del cartel está la tabla,
+  // llena de números de causa.
+  const RE_ENTRE_MEDIO = /^\s*:?\s*(?:[Nn][°ºor.]{0,3}\s*)?(?:[A-Z]{2,4}\s+)?$/;
+
+  // Se exige que el número venga pegado a la palabra "expediente", que es donde
+  // el PJN lo pone. Sin eso no se toma ninguno: es preferible quedarse sin
+  // número, y que el resultado dependa de otra cosa, a tomar uno equivocado.
+  function expedienteDelCartel(tramo) {
+    const t = String(tramo || '');
+    const donde = /expedientes?/ig;
+    let m;
+    while ((m = donde.exec(t))) {
+      const num = RE_NUMERO_EXP.exec(t.slice(m.index + m[0].length));
+      if (num && RE_ENTRE_MEDIO.test(num[1])) return num[2];
+    }
+    return '';
+  }
+
+  // Lo que dice un texto, sin mirar la página: así se lo puede probar con los
+  // carteles del PJN escritos a mano, que es lo que hace el banco de pruebas.
+  // Los renglones se conservan, porque son los que acotan el cartel.
+  function leerCartel(texto) {
+    const t = String(texto == null ? '' : texto).replace(/[^\S\n]+/g, ' ');
+    const hayNota = diceQueHayNota(t);
+    if (!hayNota && !diceFalla(t)) return null;
+    const tramo = tramoDelCartel(t);
+    // Que el PJN avise que la nota ya estaba no es una falla: la nota está. Sin
+    // esto, reintentar una causa que ya tenía nota la anotaba como "no salió",
+    // que es lo contrario de lo que pasó.
+    if (hayNota) return { ok: true, expediente: expedienteDelCartel(tramo), texto: tramo.slice(0, 140) };
+    return { ok: false, texto: tramo.slice(0, 140) };
+  }
+
   function mensajePJN() {
-    const t = textoPJN(document).replace(/\s+/g, ' ');
-    // Se toma el número entero, con el incidente si lo trae (32733/1980/1): si se
-    // cortaba en dos tramos, la confirmación de un incidente se leía como la del
-    // expediente principal.
-    const ok = /Ya se ha dejado nota[^]{0,80}?expediente:\s*([\d]+\/[\d]+(?:\/[A-Z0-9]+)*)/i.exec(t);
-    if (ok) return { ok: true, expediente: ok[1], texto: ok[0].slice(0, 120) };
-    const mal = /No se pudo realizar la acci[^]{0,140}/i.exec(t);
-    if (mal) return { ok: false, texto: mal[0].slice(0, 140) };
-    return null;
+    return leerCartel(textoPJN(document));
+  }
+
+  // Qué resultado le corresponde a la causa que se acaba de confirmar, según lo
+  // que diga el cartel. Solo decide: guardar el resultado y anotar el problema
+  // en el lote es cosa de quien la llama. Así se la puede probar entera, con
+  // los carteles reales del PJN, sin dejar ninguna nota.
+  function resultadoDelCartel(causa, m) {
+    if (m && m.ok && m.expediente) {
+      return mismoExpediente(causa, m.expediente)
+        ? { ok: true, m: '' }
+        : { ok: null, m: 'el PJN respondió por ' + m.expediente };
+    }
+    // El cartel del éxito no nombra el expediente: vale para la causa que se
+    // acaba de confirmar en esta misma recarga, que es la única que pudo
+    // provocarlo. Queda anotado que el PJN no lo nombró.
+    if (m && m.ok) return { ok: true, m: 'el PJN confirmó sin nombrar el expediente' };
+    if (m && !m.ok) return { ok: false, m: String(m.texto || '').slice(0, 70) };
+    return { ok: null, m: 'sin respuesta visible del PJN' };
   }
 
   // "CIV 032733/1980" en la tabla y "32733/1980" en el mensaje. El PJN suele
@@ -2692,7 +2860,8 @@
   // El turno lleva también el avance (hechas y la que está en curso): si una
   // copia vieja de la tanda gana el turno, no repite lo que hizo la otra.
   const escribirTurno = (c) => {
-    try { localStorage.setItem(K_TURNO, JSON.stringify({ corrida: c.id, token: c.token, ts: Date.now(), hechos: c.hechos, enCurso: c.enCurso || null, confirmado: !!c.confirmado })); } catch (e) { /* sin almacén */ }
+    const turno = { corrida: c.id, token: c.token, ts: Date.now(), hechos: c.hechos, enCurso: c.enCurso || null, confirmado: !!c.confirmado };
+    try { localStorage.setItem(K_TURNO, JSON.stringify(turno)); } catch (e) { /* sin almacén */ }
   };
   const soltarTurno = (c) => {
     const t = leerTurno();
@@ -2868,19 +3037,10 @@
       const e = c.enCurso;
       if (enRel) {
         await esperarA(() => !!mensajePJN(), 6000);
-        const m = mensajePJN();
-        if (m && m.ok && mismoExpediente(e, m.expediente)) {
-          anotarResultado(e, true, '');
-        } else if (m && !m.ok) {
-          c.problemas.push(e + ': ' + m.texto.slice(0, 70));
-          anotarResultado(e, false, m.texto.slice(0, 70));
-        } else {
-          // Sin respuesta clara: la nota pudo haberse dejado. Queda para verificar.
-          const t = m && m.ok ? 'el PJN respondió por ' + m.expediente : 'sin respuesta visible del PJN';
-          c.problemas.push(e + ': ' + t);
-          c.dudas.push(e);
-          anotarResultado(e, null, t);
-        }
+        const r = resultadoDelCartel(e, mensajePJN());
+        if (r.ok !== true) c.problemas.push(e + ': ' + r.m);
+        if (r.ok === null) c.dudas.push(e);
+        anotarResultado(e, r.ok, r.m);
       } else if (abortarNota || c.cortar) {
         c.problemas.push(e + ': no se llegó a ver la respuesta del PJN');
         c.dudas.push(e);
@@ -3050,8 +3210,15 @@
       NOTAS[e] = { f: hoy, t: ahora, ok: (enDuda || !malos[e]) ? null : false,
         m: malos[e] || 'no se vio la respuesta del PJN en esta pestaña' };
     });
-    // Una causa elegida que no apareció con lápiz y que hoy ya tenía nota dejada
-    // no es una falla: que el PJN le saque el lápiz es la consecuencia de la nota.
+    // Una causa elegida que no apareció con lápiz en ninguna página y que hoy ya
+    // tenía nota dejada no se anota como falla: el resultado que ya tiene vale
+    // más que no haberla encontrado en esta pasada.
+    //
+    // Hasta la 1.3.5 acá decía que el PJN le saca el lápiz una vez dejada la
+    // nota, y es falso: el autor lo corrigió el 25/09/2026. El lápiz sigue
+    // estando y se puede reintentar; lo que hace el PJN es avisar que la nota ya
+    // estaba. De modo que no aparecer con lápiz no se explica por la nota: la
+    // causa no estaba en la lista, o el PJN no la ofrece ese día.
     const yaEstaban = [];
     const noSalieron = [];
     noVistas.forEach((e) => {
@@ -3072,7 +3239,7 @@
     const aVerificar = c.hechos.filter((e) => res(e).ok === null);
     const fallas = c.hechos.filter((e) => res(e).ok === false).concat(noSalieron);
     avisar((motivo ? motivo + ' ' : '') + 'Terminado: ' + plural(ok, 'nota dejada', 'notas dejadas') +
-      (yaEstaban.length ? '. ' + plural(yaEstaban.length, 'ya tenía', 'ya tenían') + ' nota dejada hoy y el PJN no le' + (yaEstaban.length > 1 ? 's' : '') + ' muestra el lápiz: ' + yaEstaban.join(' | ') : '') +
+      (yaEstaban.length ? '. ' + plural(yaEstaban.length, 'ya tenía', 'ya tenían') + ' nota dejada hoy y el PJN no ' + (yaEstaban.length > 1 ? 'las ofreció' : 'la ofreció') + ' en esta lista: ' + yaEstaban.join(' | ') : '') +
       (aVerificar.length ? '. A verificar en el expediente ' + aVerificar.length + ': ' + aVerificar.map(detalle).join(' | ') : '') +
       (fallas.length ? '. No salieron ' + fallas.length + ': ' + fallas.map(detalle).join(' | ') : '') + '.' +
       (popupAbierto() ? ' Quedó abierto el cartel del PJN: cerralo con Cancelar.' : ''), !!(fallas.length || aVerificar.length));
@@ -3293,11 +3460,11 @@
 
   // Devuelve los bytes del archivo listo para guardar.
   async function protegerTexto(txt, contra) {
-    const clave = String(contra || '');
-    if (!clave) throw new Error('falta la contraseña del respaldo');
+    const contrasena = String(contra || '');
+    if (!contrasena) throw new Error('falta la contraseña del respaldo');
     const sal = cripto().getRandomValues(new Uint8Array(16));
     const iv = cripto().getRandomValues(new Uint8Array(12));
-    const k = await claveDesde(clave, sal);
+    const k = await claveDesde(contrasena, sal);
     const cifrado = new Uint8Array(await cripto().subtle.encrypt({ name: 'AES-GCM', iv }, k, bytesDe(txt)));
     const out = new Uint8Array(MARCA.length + 1 + sal.length + iv.length + cifrado.length);
     out.set(MARCA, 0);
@@ -3314,15 +3481,15 @@
   async function desprotegerTexto(bytes, contra) {
     const b = (bytes instanceof Uint8Array) ? bytes : new Uint8Array(bytes);
     if (!esArchivoNuestro(b)) return new TextDecoder().decode(b);
-    const clave = String(contra || '');
-    if (!clave) throw new Error('ese archivo tiene contraseña y todavía no pusiste la tuya');
+    const contrasena = String(contra || '');
+    if (!contrasena) throw new Error('ese archivo tiene contraseña y todavía no pusiste la tuya');
     const p = MARCA.length + 1;
-    const k = await claveDesde(clave, b.subarray(p, p + 16));
+    const k = await claveDesde(contrasena, b.subarray(p, p + 16));
     let claro;
     try {
       claro = await cripto().subtle.decrypt({ name: 'AES-GCM', iv: b.subarray(p + 16, p + 28) }, k, b.subarray(p + 28));
     } catch (e) {
-      throw new Error('la contraseña no abre ese archivo');
+      throw new Error('la contraseña no abre ese archivo', { cause: e });
     }
     return new TextDecoder().decode(claro);
   }
@@ -3530,7 +3697,7 @@
   // Solo se importa lo que dice ser de esta cuenta. Un archivo sin cuenta
   // adentro es de una versión anterior: se trae manualmente con Importar.
   function importarTextoCarpeta(texto) {
-    let d = null;
+    let d;
     try { d = JSON.parse(texto); } catch (e) { d = null; }
     if (!d || d.cuenta !== CUENTA) {
       if (d) carpetaAviso = 'el archivo de la carpeta no corresponde a esta cuenta, así que no se importó automáticamente';
@@ -3579,8 +3746,8 @@
   // Reemplazar el respaldo de la carpeta que esta PC no puede abrir (por
   // ejemplo, después de cambiar la contraseña) con los datos de esta PC. Lo
   // que estuviera solo en ese archivo se pierde: por eso se pide confirmar.
-  async function pisarCarpeta() {
-    if (!CARPETA || !CUENTA || !hayContra()) return false;
+  function pisarCarpeta() {
+    if (!CARPETA || !CUENTA || !hayContra()) return Promise.resolve(false);
     carpetaBloqueada = false;
     leyoLaCarpeta = true;
     return escribirEnCarpeta();
@@ -4021,7 +4188,7 @@
     zoom: 1, encuadrar: true
   };
   const CFG_GUARDADA = leerAlmacen(K_CFG, {}) || {};
-  let CFG = Object.assign({}, CFG_DEF, CFG_GUARDADA);
+  const CFG = Object.assign({}, CFG_DEF, CFG_GUARDADA);
   // La 0.1.0 llamaba "nota" a la columna de la anotación.
   if (!CFG_GUARDADA.cols && CFG.orden && CFG.orden.col === 'nota') CFG.orden = { col: 'anot', desc: CFG.orden.desc };
   if (!CFG_GUARDADA.cols && CFG.etiqueta === '@nota') CFG.etiqueta = '@anot';
@@ -4121,12 +4288,12 @@
   // Clic en un título: un sentido, el otro y, en actuaciones, de vuelta al
   // orden en que las trae el PJN.
   function alternarOrden(tabla, k) {
-    const clave = TABLAS[tabla].orden;
-    const o = CFG[clave] || { col: '', desc: true };
+    const claveOrden = TABLAS[tabla].orden;
+    const o = CFG[claveOrden] || { col: '', desc: true };
     const d0 = tabla === 'lista' ? (k === 'ult' || k === 'nota') : (k === 'fecha');
-    if (o.col !== k) CFG[clave] = { col: k, desc: d0 };
-    else if (o.desc === d0) CFG[clave] = { col: k, desc: !d0 };
-    else CFG[clave] = tabla === 'act' ? { col: '', desc: true } : { col: k, desc: d0 };
+    if (o.col !== k) CFG[claveOrden] = { col: k, desc: d0 };
+    else if (o.desc === d0) CFG[claveOrden] = { col: k, desc: !d0 };
+    else CFG[claveOrden] = tabla === 'act' ? { col: '', desc: true } : { col: k, desc: d0 };
     guardarCfg();
   }
 
@@ -4393,18 +4560,30 @@
     '.sj-tit .ctrl button:hover{background:rgba(255,255,255,.18)}',
     '.sj-tit .ctrl button.x:hover{background:#c93b3b}',
     // Si la ventana es angosta, las solapas pasan a una segunda línea en vez de esconderse.
-    '.sj-solapas{display:flex;flex-wrap:wrap;gap:2px;padding:0 10px;background:#e9f0f6;border-bottom:1px solid #c9d7e3;flex:none}',
-    '.sj-solapas button{background:transparent;border:0;border-bottom:3px solid transparent;color:#4a6272;padding:8px 12px 6px;cursor:pointer;font:600 12.5px "Segoe UI",Arial,sans-serif;white-space:nowrap}',
+    // Menú de solapas (1.4.1, opción elegida por el autor el 28/09/2026): un
+    // escalón más grande que el resto de la ventana, y la solapa activa como una
+    // pestaña blanca recortada sobre el fondo, al estilo de las carpetas de un
+    // archivo. Nada más cambia de tamaño.
+    '.sj-solapas{display:flex;flex-wrap:wrap;gap:4px;padding:6px 10px 0;background:#dde7f0;border-bottom:1px solid #c9d7e3;flex:none}',
+    '.sj-solapas button{background:transparent;border:0;border-radius:8px 8px 0 0;color:#3e586b;padding:10px 16px 9px;cursor:pointer;font:600 15px "Segoe UI",Arial,sans-serif;white-space:nowrap}',
     '.sj-solapas button:hover{color:' + AZUL + '}',
-    '.sj-solapas button.act{color:' + AZUL + ';border-bottom-color:' + AZUL + ';background:#fff}',
-    '.sj-solapas .cant{background:#d4e1ec;color:' + AZUL + ';border-radius:9px;padding:0 6px;margin-left:5px;font-size:11px}',
+    '.sj-solapas button.act{color:' + AZUL + ';background:#fff;box-shadow:0 -2px 0 ' + AZUL + ' inset}',
+    '.sj-solapas .cant{background:#d4e1ec;color:' + AZUL + ';border-radius:9px;padding:0 7px;margin-left:6px;font-size:12.5px}',
+    // Íconos de las solapas y de los botones (1.4.0): un símbolo antes del texto, del mismo color que el texto.
+    '.sj-solapas .ico,.sj-b .ico,.sj-tit .fn .ico{display:inline-block;margin-right:5px;font-size:13px;line-height:1;vertical-align:-1px;opacity:.85}',
+    '.sj-solapas .ico{font-size:17px;margin-right:6px}',
+    '.sj-solapas button.act .ico{opacity:1}',
+    // Lo que requiere atención, con color: novedades en verde y notas a verificar en ámbar.
+    '.sj-solapas .cant.verde{background:#2e9e4f;color:#fff}',
+    '.sj-solapas .cant.ambar{background:#d18a00;color:#fff}',
+    '.sj-solapas .cant.rojo{background:#c0392b;color:#fff}',
     // La cruz de la solapa del expediente: se ve siempre, y se resalta al pasar por encima.
     '.sj-solapas .cerrar{margin-left:7px;padding:0 3px;border-radius:3px;font-size:13px;line-height:1;opacity:.55}',
     '.sj-solapas .cerrar:hover{opacity:1;background:#c93b3b;color:#fff}',
     '.sj-barra{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;padding:8px 12px;border-bottom:1px solid #dbe4e8;background:#f5f8fa;flex:none}',
     '.sj-barra > *{height:30px;font:12px "Segoe UI",Arial,sans-serif}',
     '.sj-barra input[type=text]{flex:1 1 220px;min-width:160px;border:1px solid #b9c9d0;border-radius:5px;padding:0 9px}',
-    '.sj-barra select,.sj-barra input[type=date]{height:30px;border:1px solid #b9c9d0;border-radius:5px;padding:0 6px;background:#fff;color:#1d2b36;max-width:200px}',
+    '.sj-barra select,.sj-barra input[type=date],.sj-barra input.sj-fecha{height:30px;border:1px solid #b9c9d0;border-radius:5px;padding:0 6px;background:#fff;color:#1d2b36;max-width:200px}',
     '.sj-barra label{display:inline-flex;align-items:center;gap:5px;color:#5a7581}',
     '.sj-b{border:1px solid #b9cde0;background:#eaf1f8;color:' + AZUL + ';border-radius:5px;padding:0 11px;cursor:pointer;font:600 12px "Segoe UI",Arial,sans-serif;height:30px;white-space:nowrap}',
     '.sj-b:hover{background:#dbe8f5}',
@@ -4470,6 +4649,26 @@
     'table.sj-t td .sj-exp{white-space:normal}',
     '.sj-fav{color:#d39e00;margin-left:4px}',
     '.sj-badge{display:inline-block;margin-top:3px;font-size:10.5px;font-weight:600;color:#6b7c85;background:#eef2f4;border-radius:8px;padding:0 7px}',
+    // Placas de estado (1.4.0). El mismo lenguaje de color en toda la ventana,
+    // como lo usa el PJN en Escritos: texto blanco sobre un color pleno. Cada
+    // color significa siempre lo mismo: verde, resuelto o en curso normal;
+    // índigo, en poder de la dependencia; azul, enviado; ámbar, pendiente o a
+    // verificar; rojo, fallido o paralizado; gris, archivado o cerrado.
+    '.sj-estado{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11.5px;font-weight:700;line-height:17px;color:#fff;background:#6b7c85;white-space:nowrap;letter-spacing:.1px}',
+    // Cuadrito con letra del tipo de actuación (1.4.1, reparto de colores
+    // elegido por el autor el 28/09/2026), en la lista de actuaciones de una
+    // causa: D despacho en azul, E escrito en verde, C cédula en rojo (plazo
+    // corriendo), O oficio electrónico (DEO y DEOX) en violeta, S sentencia o
+    // resolución en ámbar (para leer ya); cualquier otro tipo, su inicial en
+    // gris. Usa los mismos colores que las placas.
+    '.sj-tipo{display:inline-block;width:18px;height:18px;line-height:18px;text-align:center;border-radius:4px;font:700 12px "Segoe UI",Arial,sans-serif;color:#fff;background:#6b7c85;margin-right:3px;vertical-align:middle;box-sizing:border-box;letter-spacing:0}',
+    '.sj-estado.verde,.sj-tipo.verde{background:#2e9e4f}',
+    '.sj-estado.indigo,.sj-tipo.indigo{background:#5a5fc7}',
+    '.sj-estado.azul,.sj-tipo.azul{background:#2f7fc1}',
+    '.sj-estado.ambar,.sj-tipo.ambar{background:#d18a00}',
+    '.sj-estado.rojo,.sj-tipo.rojo{background:#c0392b}',
+    '.sj-estado.gris,.sj-tipo.gris{background:#6b7c85}',
+    '.sj-estado.violeta,.sj-tipo.violeta{background:#7b4fb5}',
     '.sj-elegir td.acc{text-align:right;white-space:nowrap}',
     // Descargar es un botón y Ver un enlace, porque abre una pestaña nueva. Se
     // los dibuja igual para que la columna no quede despareja: el enlace toma
@@ -4480,14 +4679,18 @@
     '.sj-rol{color:#6b7c85;font-size:11px;text-transform:uppercase;letter-spacing:.02em}',
     '.sj-sep{color:#b9c6cc;margin:0 5px}',
     '.sj-exp-cab .c .p{margin-top:2px;font-size:12.5px;color:#24414f}',
-    '.sj-nuevo{background:#1b6b3a;color:#fff;border-radius:8px;padding:0 6px;font-size:10.5px;font-weight:700;margin-right:6px;vertical-align:1px}',
+    '.sj-nuevo{background:#2e9e4f;color:#fff;border-radius:9px;padding:0 7px 0 5px;font-size:10.5px;font-weight:700;margin-right:6px;vertical-align:1px;box-shadow:0 0 0 2px #e3f4e8}',
+    '.sj-nuevo::before{content:"\\25CF";margin-right:4px;font-size:8px;vertical-align:1px}',
     '.sj-hora{color:#0a6cab;font-weight:600}',
     '.sj-leido{color:#3a4c54}',
     '.sj-leido.vieja{color:#b3261e;font-weight:600}',
-    '.sj-res{font-size:11.5px;font-weight:600;white-space:nowrap}',
-    '.sj-res.ok{color:#1b6b3a}',
-    '.sj-res.mal{color:#b3261e}',
-    '.sj-res.duda{color:#8a5a00}',
+    // Resultado de dejar nota (1.4.0): placa con el mismo lenguaje de color.
+    '.sj-res{display:inline-block;padding:1px 9px;border-radius:12px;font-size:11.5px;font-weight:700;white-space:nowrap;color:#fff;background:#6b7c85}',
+    '.sj-res.ok{background:#2e9e4f}',
+    '.sj-res.mal{background:#c0392b}',
+    '.sj-fecha{width:100px;font-variant-numeric:tabular-nums}',
+    '.sj-fecha.mal{border-color:#b3261e;color:#b3261e}',
+    '.sj-res.duda{background:#d18a00}',
     '.sj-chip{display:inline-block;padding:1px 9px;border-radius:10px;font:600 11px "Segoe UI",Arial,sans-serif;margin:0 4px 3px 0;border:1px solid rgba(0,0,0,.12);white-space:nowrap}',
     'button.sj-chip{cursor:pointer}',
     '.sj-chip.off{background:transparent!important;color:#8a98a8!important;border-style:dashed}',
@@ -4570,7 +4773,7 @@
     '.sj-elegir{border:1px solid #dbe4e8;border-radius:6px;margin-top:8px;background:#fff}',
     '.sj-elegir .fil{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;padding:8px 10px;border-bottom:1px solid #e6ecef;background:#f5f8fa}',
     '.sj-elegir .fil input[type=text]{flex:1 1 180px;min-width:140px;height:28px;border:1px solid #b9c9d0;border-radius:5px;padding:0 8px}',
-    '.sj-elegir .fil input[type=date]{height:28px;border:1px solid #b9c9d0;border-radius:5px;padding:0 5px}',
+    '.sj-elegir .fil input.sj-fecha{width:96px;height:28px;border:1px solid #b9c9d0;border-radius:5px;padding:0 5px}',
     '.sj-elegir .fil .cnt{margin-left:auto;color:#5a7581;font-size:12px}',
     '.sj-elegir .lst{max-height:calc(var(--sj-h,100vh) * .46);overflow:auto}',
     '.sj-elegir table{border-collapse:collapse;width:100%}',
@@ -4663,6 +4866,10 @@
 
   // ------------------------------------------------------------- 6.3 solapas
 
+  // Íconos (1.4.0): símbolos de la fuente, sin imágenes ni bibliotecas.
+  const ICONO_SOLAPA = { rel: '\u2696', fav: '\u2605', exp: '\u25A4', escr: '\u270E', notif: '\u2709', deox: '\u21C4', guia: '\u260E', nota: '\u270D', desc: '\u21E9', marcas: '\u26C1', acerca: '\u24D8' };
+  const icono = (c) => (c ? '<span class="ico" aria-hidden="true">' + c + '</span>' : '');
+
   function pintarSolapas() {
     const e = q('[data-e="solapas"]');
     if (!e) return;
@@ -4680,9 +4887,13 @@
     s.push(['desc', 'Descargas', COLA.length ? (activos || COLA.length) : null]);
     s.push(['marcas', 'Respaldo', null, 'Respaldo, etiquetas y anotaciones']);
     s.push(['acerca', 'Acerca de', null]);
+    // Cuentas de atención (1.4.0): novedades en Mis causas y notas a verificar en Dejar nota.
+    const novedades = DATOS.rel ? DATOS.rel.causas.filter((x) => esNovedad(x, DATOS.rel.fecha)).length : 0;
+    const aVerificar = Object.values(NOTAS).filter((x) => x && x.ok === null).length;
+    const atencion = (k) => (k === 'rel' && novedades ? '<span class="cant verde" title="Causas con novedades">' + novedades + '</span>' : k === 'nota' && aVerificar ? '<span class="cant ambar" title="Notas a verificar">' + aVerificar + '</span>' : '');
     e.innerHTML = s.map(([k, t, n, tit, cerrable]) => '<button data-vista="' + k + '" class="' + (VISTA === k ? 'act' : '') + '"' +
-      (tit ? ' title="' + esc(tit) + '"' : '') + '>' + esc(t) +
-      (n == null ? '' : '<span class="cant">' + n + '</span>') +
+      (tit ? ' title="' + esc(tit) + '"' : '') + '>' + icono(ICONO_SOLAPA[k]) + esc(t) +
+      (n == null ? '' : '<span class="cant">' + n + '</span>') + atencion(k) +
       (cerrable ? '<span class="cerrar" data-cerrar="' + k + '" title="Cerrar esta solapa">\u00d7</span>' : '') + '</button>').join('');
   }
 
@@ -4745,8 +4956,8 @@
     CFG.etiqueta = et;
     q('[data-f="tramite"]').value = CFG.tramite;
     q('[data-f="texto"]').value = CFG.texto;
-    q('[data-f="desde"]').value = CFG.desde;
-    q('[data-f="hasta"]').value = CFG.hasta;
+    q('[data-f="desde"]').value = textoDesdeISO(CFG.desde);
+    q('[data-f="hasta"]').value = textoDesdeISO(CFG.hasta);
     pintarOrdenPJN();
     pintarNovedades();
   }
@@ -4758,7 +4969,7 @@
     const b = q('[data-e="novedades"]');
     if (!b) return;
     const n = contarNovedades();
-    b.textContent = n ? 'Novedades (' + n + ')' : 'Novedades';
+    b.innerHTML = icono('\u25CF') + (n ? 'Novedades (' + n + ')' : 'Novedades');
     b.classList.toggle('act', CFG.novedades);
     b.disabled = !n && !CFG.novedades;
     const m = q('[data-a="vistoTodo"]');
@@ -4819,7 +5030,7 @@
 
   function pintarBotonesLectura() {
     const a = q('[data-a="actualizar"]'), c = q('[data-a="cortarLectura"]');
-    if (a) { a.disabled = leyendo; a.textContent = leyendo ? 'Leyendo...' : 'Actualizar'; }
+    if (a) { a.disabled = leyendo; a.innerHTML = leyendo ? 'Leyendo...' : icono('\u27F3') + 'Actualizar'; }
     // La tanda de horas puede durar varios minutos: el mismo botón la corta.
     if (c) c.style.display = (leyendo || horasEnCurso) ? '' : 'none';
     pintarPastilla();
@@ -4835,10 +5046,10 @@
     const dis = (x) => (x ? ' disabled' : '');
     const sinBajar = b ? ' title="Durante un lote de notas no se descarga nada: la página se recarga en cada nota"' : '';
     e.innerHTML = '<span class="cuenta">' + (n ? plural(n, 'seleccionada', 'seleccionadas') : 'Ninguna seleccionada') + '</span>' +
-      '<button class="sj-b" data-a="notaSel"' + dis(!n || b) + ' title="Lleva a la solapa Dejar nota con estas causas">Dejar nota en las seleccionadas</button>' +
-      '<button class="sj-b" data-a="bajarSel"' + dis(!n || b) + sinBajar + '>Descargar PDF de las seleccionadas</button>' +
-      '<button class="sj-b" data-a="elegirSel"' + dis(n !== 1 || b) + (sinBajar || ' title="Con una causa seleccionada: elegir qué actuaciones descargar"') + '>Elegir actuaciones</button>' +
-      '<button class="sj-b" data-a="quitarSel"' + dis(!n) + '>Quitar selección</button>';
+      '<button class="sj-b" data-a="notaSel"' + dis(!n || b) + ' title="Lleva a la solapa Dejar nota con estas causas">' + icono('\u270D') + 'Dejar nota en las seleccionadas</button>' +
+      '<button class="sj-b" data-a="bajarSel"' + dis(!n || b) + sinBajar + '>' + icono('\u21E9') + 'Descargar PDF de las seleccionadas</button>' +
+      '<button class="sj-b" data-a="elegirSel"' + dis(n !== 1 || b) + (sinBajar || ' title="Con una causa seleccionada: elegir qué actuaciones descargar"') + '>' + icono('\u2611') + 'Elegir actuaciones</button>' +
+      '<button class="sj-b" data-a="quitarSel"' + dis(!n) + '>' + icono('\u2715') + 'Quitar selección</button>';
     // El número de la solapa Dejar nota sigue a la selección.
     pintarSolapas();
   }
@@ -4893,11 +5104,41 @@
     return '<tr><td class="sj-exp">' + ir(k) + '</td>' +
       '<td>' + (c && c.car ? ir(c.car) : '') + (enRel ? '' : '<br><span class="sj-badge">no está en Mis causas</span>') + '</td>' +
       '<td style="white-space:nowrap">' + (n && n.f === hoyISO()
-        ? '<span class="sj-res ' + resNota(n).c + '" title="' + esc(n.m || '') + '">' + (n.ok === true ? 'nota dejada' : resNota(n).t) + '</span>'
-        : '') + '</td>' +
+      ? '<span class="sj-res ' + resNota(n).c + '" title="' + esc(n.m || '') + '">' + (n.ok === true ? 'nota dejada' : resNota(n).t) + '</span>'
+      : '') + '</td>' +
       (quitable ? '<td style="text-align:right;width:1%"><button class="sj-b chico" data-a="quitarUna" data-k="' + esc(k) + '" title="Sacarla de la selección">Quitar</button></td>' : '<td></td>') +
       '</tr>';
   }
+
+  /* --- Verificar las que quedaron a verificar --------------------------------
+     El PJN admite una sola nota por expediente y por día: ante un segundo
+     intento contesta "Ya se ha dejado nota con el usuario … en el expediente:
+     … No es posible realizar dicha acción más de una vez al día por
+     expediente", y esa respuesta es la confirmación de que la nota está.
+
+     De modo que volver a intentarlo sobre una causa que quedó en duda no puede
+     dejar una nota de más: o el PJN avisa que ya estaba, y queda registrada
+     como dejada, o la deja porque faltaba, que es lo que el lote buscaba. Es lo
+     mismo que el autor venía haciendo a mano, pero solo sobre las dudosas.
+
+     No hay mecanismo nuevo: se usa el lote de siempre, con la lista de dudosas
+     como selección.
+  --------------------------------------------------------------------------- */
+  const conResultado = (v) => {
+    refrescarNotas();
+    const hoy = hoyISO();
+    return Object.keys(NOTAS).filter((k) => NOTAS[k].f === hoy && NOTAS[k].ok === v);
+  };
+  const dudosasDeHoy = () => conResultado(null);
+
+  const TITULO_VERIFICAR = 'Vuelve a intentar la nota solo en las causas que quedaron a verificar. ' +
+    'Si ya estaba dejada, el PJN lo avisa y queda registrada como dejada; si faltaba, la deja. ' +
+    'El PJN admite una sola nota por expediente y por día, de modo que nunca quedan dos.';
+
+  const botonVerificarHTML = (dudosas) => (dudosas.length
+    ? '<button class="sj-b peligro" data-a="verificarDudosas" title="' + esc(TITULO_VERIFICAR) + '">Verificar en el PJN (' +
+      dudosas.length + ')</button>'
+    : '');
 
   function panelNotaHTML() {
     refrescarNotas();
@@ -4940,6 +5181,9 @@
       ? '<p>' + plural(bien.length, 'nota dejada', 'notas dejadas') +
         (dudosas.length ? ', ' + plural(dudosas.length, 'a verificar en el expediente', 'a verificar en el expediente') : '') +
         (deHoy.length - bien.length - dudosas.length ? ' y ' + plural(deHoy.length - bien.length - dudosas.length, 'que no salió', 'que no salieron') : '') + '.</p>' +
+        // Las que quedaron en duda se resuelven acá mismo, sin volver a correr
+        // el lote entero ni tener que abrir cada expediente.
+        (corriendo ? '' : '<div class="bts">' + botonVerificarHTML(dudosas) + '</div>') +
         '<table class="lista">' + deHoy.map((k) => filaNotaHTML(k, false)).join('') + '</table>'
       : '<p style="color:#6b7c85">Todavía no se dejó ninguna nota hoy desde SuPJN+.</p>';
     return h + '</div>';
@@ -4987,6 +5231,7 @@
         (c.tramite ? '' : '<br><span class="sj-badge">fuera de trámite</span>');
     }
     if (k === 'partes') return partesHTML(partesDe(c));
+    if (k === 'sit') return placaSituacionHTML(c.sit);
     if (k === 'ult') {
       const h = HORAS[c.exp];
       return esc(c.ult) + (h && h.f === c.ult
@@ -5213,10 +5458,10 @@
     if (!retomarLugar(VISTA, cuerpo)) cuerpo.scrollTop = arriba;
 
     const nums = [];
-    const ventana = 9;
-    let ini = Math.max(1, pagina - Math.floor(ventana / 2));
-    const fin = Math.min(paginas, ini + ventana - 1);
-    ini = Math.max(1, fin - ventana + 1);
+    const anchoPaginador = 9;
+    let ini = Math.max(1, pagina - Math.floor(anchoPaginador / 2));
+    const fin = Math.min(paginas, ini + anchoPaginador - 1);
+    ini = Math.max(1, fin - anchoPaginador + 1);
     for (let i = ini; i <= fin; i++) {
       nums.push('<button data-pag="' + i + '"' + (i === pagina ? ' class="act" disabled' : '') + '>' + i + '</button>');
     }
@@ -5428,26 +5673,26 @@
     rec: 'Los recursos de esta causa, con su tipo y su estado.'
   };
 
-  function solapaExpHTML(clave) {
-    const s = EXP.solapas[clave];
-    return '<div class="sj-sec sj-solapa-exp" data-solapa="' + clave + '">' +
-      '<h4><button class="sj-desplegar" data-a="verSolapa" data-sol="' + clave + '">' + (s.abierta ? '▾' : '▸') + ' ' + esc(TITULO_SOLAPA[clave]) +
+  function solapaExpHTML(solapa) {
+    const s = EXP.solapas[solapa];
+    return '<div class="sj-sec sj-solapa-exp" data-solapa="' + solapa + '">' +
+      '<h4><button class="sj-desplegar" data-a="verSolapa" data-sol="' + solapa + '">' + (s.abierta ? '▾' : '▸') + ' ' + esc(TITULO_SOLAPA[solapa]) +
       (s.estado === 'listo' ? '<span class="sj-badge">' + s.filas.length + '</span>' : '') + '</button></h4>' +
-      '<div data-e="solapa-' + clave + '">' + (s.abierta ? cuerpoSolapaHTML(clave) : '') + '</div></div>';
+      '<div data-e="solapa-' + solapa + '">' + (s.abierta ? cuerpoSolapaHTML(solapa) : '') + '</div></div>';
   }
 
-  function cuerpoSolapaHTML(clave) {
-    const s = EXP.solapas[clave];
+  function cuerpoSolapaHTML(solapa) {
+    const s = EXP.solapas[solapa];
     if (s.estado === 'leyendo') return '<div class="sj-sol-txt">' + esc(s.texto || 'Consultando al PJN...') + '</div><div class="sj-prog"><i style="width:35%"></i></div>';
-    if (s.estado === 'error') return '<div class="sj-sol-txt mal">' + esc(s.texto) + '</div><div class="bts"><button class="sj-b chico" data-a="verSolapa" data-sol="' + clave + '" data-otra="1">Probar de nuevo</button></div>';
-    if (s.estado !== 'listo') return '<div class="sj-sol-txt">' + esc(AYUDA_SOLAPA[clave]) + '</div>';
+    if (s.estado === 'error') return '<div class="sj-sol-txt mal">' + esc(s.texto) + '</div><div class="bts"><button class="sj-b chico" data-a="verSolapa" data-sol="' + solapa + '" data-otra="1">Probar de nuevo</button></div>';
+    if (s.estado !== 'listo') return '<div class="sj-sol-txt">' + esc(AYUDA_SOLAPA[solapa]) + '</div>';
     if (!s.filas.length) {
       return s.completa === false
-        ? '<div class="sj-sol-txt mal">' + esc('El PJN no llegó a llenar ' + TITULO_SOLAPA[clave] + ': no se puede saber si tiene contenido. Probá "Volver a leer".') + '</div>' +
-          '<div class="bts"><button class="sj-b chico" data-a="verSolapa" data-sol="' + clave + '" data-otra="1">Volver a leer</button></div>'
-        : '<div class="sj-sol-txt">' + esc('El PJN no tiene nada en ' + TITULO_SOLAPA[clave] + ' para esta causa.') + '</div>';
+        ? '<div class="sj-sol-txt mal">' + esc('El PJN no llegó a llenar ' + TITULO_SOLAPA[solapa] + ': no se puede saber si tiene contenido. Probá "Volver a leer".') + '</div>' +
+          '<div class="bts"><button class="sj-b chico" data-a="verSolapa" data-sol="' + solapa + '" data-otra="1">Volver a leer</button></div>'
+        : '<div class="sj-sol-txt">' + esc('El PJN no tiene nada en ' + TITULO_SOLAPA[solapa] + ' para esta causa.') + '</div>';
     }
-    const acciones = clave === 'vin';
+    const acciones = solapa === 'vin';
     return '<div class="lst-sol"><table class="sj-t sj-fija"><thead><tr>' +
       s.cabs.map((c) => '<th>' + esc(c) + '</th>').join('') + (acciones ? '<th></th>' : '') + '</tr></thead><tbody>' +
       s.filas.map((f) => '<tr>' + f.map((v, i) => '<td' + (i === 0 ? ' class="sj-exp"' : '') + '>' + esc(v) + '</td>').join('') +
@@ -5460,15 +5705,15 @@
       esc(s.completa === false
         ? 'El PJN dejó de contestar mientras se pasaban las páginas: esto es lo que se alcanzó a leer y puede faltar. Probá "Volver a leer".'
         : 'Leído ' + hace(s.fecha || Date.now()) + '.') +
-      '</div><div class="bts"><button class="sj-b chico" data-a="verSolapa" data-sol="' + clave + '" data-otra="1">Volver a leer</button></div>';
+      '</div><div class="bts"><button class="sj-b chico" data-a="verSolapa" data-sol="' + solapa + '" data-otra="1">Volver a leer</button></div>';
   }
 
-  function pintarSolapaExp(clave) {
-    const cont = q('[data-e="solapa-' + clave + '"]');
-    const s = EXP.solapas[clave];
-    if (cont) cont.innerHTML = s.abierta ? cuerpoSolapaHTML(clave) : '';
-    const b = q('[data-a="verSolapa"][data-sol="' + clave + '"]');
-    if (b) b.innerHTML = (s.abierta ? '▾' : '▸') + ' ' + esc(TITULO_SOLAPA[clave]) + (s.estado === 'listo' ? '<span class="sj-badge">' + s.filas.length + '</span>' : '');
+  function pintarSolapaExp(solapa) {
+    const cont = q('[data-e="solapa-' + solapa + '"]');
+    const s = EXP.solapas[solapa];
+    if (cont) cont.innerHTML = s.abierta ? cuerpoSolapaHTML(solapa) : '';
+    const b = q('[data-a="verSolapa"][data-sol="' + solapa + '"]');
+    if (b) b.innerHTML = (s.abierta ? '▾' : '▸') + ' ' + esc(TITULO_SOLAPA[solapa]) + (s.estado === 'listo' ? '<span class="sj-badge">' + s.filas.length + '</span>' : '');
     const p = q('[data-e="partesExp"]');
     if (p) p.innerHTML = partesExpHTML();
   }
@@ -5516,8 +5761,30 @@
     return out;
   }
 
+  // Cuadrito con letra del tipo de actuación (1.4.1). El tipo lo trae el PJN
+  // en la tabla del expediente ("DESPACHO", "ESCRITO", "CEDULA ELECTRONICA",
+  // "DEOX", "SENTENCIA"...). La letra y el color salen de la palabra clave; un
+  // tipo que no está en la lista lleva su inicial en gris. El texto del tipo
+  // sigue al lado del cuadrito, así el filtro por texto no cambia.
+  function letraTipoActuacion(tipo) {
+    const t = norm(tipo || '');
+    if (!t) return null;
+    if (/^despacho/.test(t)) return { letra: 'D', color: 'azul', que: 'Despacho' };
+    if (/^escrito/.test(t)) return { letra: 'E', color: 'verde', que: 'Escrito' };
+    if (/cedula/.test(t)) return { letra: 'C', color: 'rojo', que: 'Cédula' };
+    if (/\bdeox?\b/.test(t)) return { letra: 'O', color: 'violeta', que: 'Oficio electrónico (DEO/DEOX)' };
+    if (/sentencia|resoluci/.test(t)) return { letra: 'S', color: 'ambar', que: 'Sentencia o resolución' };
+    return { letra: t.charAt(0).toUpperCase(), color: 'gris', que: '' };
+  }
+  function cuadritoTipoHTML(tipo) {
+    const l = letraTipoActuacion(tipo);
+    if (!l) return '';
+    // Después del cuadrito va un espacio de verdad: al copiar la celda queda "D DESPACHO".
+    return '<span class="sj-tipo ' + esc(l.color) + '" data-letra="' + esc(l.letra) + '" title="' + esc(l.que || tipo) + '">' + esc(l.letra) + '</span>';
+  }
+
   function celdaAct(a, k) {
-    if (k === 'tipo') return esc(a.tipo) + (a.hist ? ' <span class="sj-badge">histórica</span>' : '');
+    if (k === 'tipo') return cuadritoTipoHTML(a.tipo) + ' ' + esc(a.tipo) + (a.hist ? ' <span class="sj-badge">histórica</span>' : '');
     return esc(a[k]);
   }
 
@@ -5549,8 +5816,8 @@
     }).join('');
     return '<div class="sj-elegir" data-elegir="' + esc(id) + '">' +
       '<div class="fil"><input type="text" data-ef="texto" placeholder="Filtrar por fecha, tipo o detalle" value="' + esc(ctx.filtro.texto) + '">' +
-      '<label>Desde <input type="date" data-ef="desde" value="' + esc(ctx.filtro.desde) + '"></label>' +
-      '<label>hasta <input type="date" data-ef="hasta" value="' + esc(ctx.filtro.hasta) + '"></label>' +
+      '<label>Desde ' + campoFecha('data-ef="desde"', ctx.filtro.desde) + '</label>' +
+      '<label>hasta ' + campoFecha('data-ef="hasta"', ctx.filtro.hasta) + '</label>' +
       '<button class="sj-b chico" data-ea="todas" title="Elegir las que se ven">Todas</button>' +
       '<button class="sj-b chico" data-ea="ninguna" title="Quitar las que se ven">Ninguna</button>' +
       '<button class="sj-b chico" data-ea="invertir" title="Invertir las que se ven">Invertir</button>' +
@@ -5697,13 +5964,13 @@
       plural(et.length, 'etiqueta', 'etiquetas') + '</b> y <b>' + plural(marcadas, 'causa marcada', 'causas marcadas') + '</b>.</p>' +
       '<h3>Carpeta de respaldo</h3>' +
       '<p>' + (carpetaEstado === 'lista'
-        ? 'Se guarda automáticamente en <b>' + esc(carpetaTexto) + '</b>: cada cambio se escribe ahí, cifrado con la contraseña de tus copias, y al abrir SuPJN+ se lee lo que haya (sirve para trabajar en dos PC con la carpeta sincronizada; en la otra PC tiene que estar puesta la misma contraseña).'
-        : carpetaEstado === 'contra'
-          ? 'Hay una carpeta elegida (<b>' + esc(carpetaTexto) + '</b>), pero ' + (carpetaBloqueada
-            ? (hayContra()
-              ? 'la contraseña de esta PC no abre el respaldo que hay ahí. Poné la misma contraseña que usaste en la otra PC, con "Ver o cambiar la contraseña". Si cambiaste la contraseña a propósito, podés reemplazar ese respaldo con los datos de esta PC.'
-              : 'el respaldo que hay ahí tiene contraseña. Poné la misma que usaste en la otra PC, más abajo, y se lee enseguida.')
-            : 'para guardar ahí hace falta la contraseña de tus copias. Ponela más abajo y se guarda enseguida.') +
+      ? 'Se guarda automáticamente en <b>' + esc(carpetaTexto) + '</b>: cada cambio se escribe ahí, cifrado con la contraseña de tus copias, y al abrir SuPJN+ se lee lo que haya (sirve para trabajar en dos PC con la carpeta sincronizada; en la otra PC tiene que estar puesta la misma contraseña).'
+      : carpetaEstado === 'contra'
+        ? 'Hay una carpeta elegida (<b>' + esc(carpetaTexto) + '</b>), pero ' + (carpetaBloqueada
+          ? (hayContra()
+            ? 'la contraseña de esta PC no abre el respaldo que hay ahí. Poné la misma contraseña que usaste en la otra PC, con "Ver o cambiar la contraseña". Si cambiaste la contraseña a propósito, podés reemplazar ese respaldo con los datos de esta PC.'
+            : 'el respaldo que hay ahí tiene contraseña. Poné la misma que usaste en la otra PC, más abajo, y se lee enseguida.')
+          : 'para guardar ahí hace falta la contraseña de tus copias. Ponela más abajo y se guarda enseguida.') +
             ' Mientras tanto no se escribe nada en la carpeta.'
         : carpetaEstado === 'pedir'
           ? 'Hay una carpeta elegida (<b>' + esc(carpetaTexto) + '</b>), pero Chrome pide confirmar el permiso otra vez. Mientras tanto no se guarda nada ahí.'
@@ -5821,7 +6088,7 @@
     const listo = () => avisar(aviso);
     const aMano = () => {
       t.select();
-      let fue = false;
+      let fue;
       try { fue = document.execCommand('copy'); } catch (x) { fue = false; }
       if (fue) listo(); else avisar('Seleccioná el texto y copialo con Ctrl+C.');
     };
@@ -6291,7 +6558,7 @@
         // Una sesión vencida o un marco perdido se reintentan una vez, con un
         // marco nuevo: la aplicación vuelve a entrar con el SSO.
         if (intento === 0 && /^(sesion|marco|sin respuesta)$/.test(m)) { cerrarPuente(app); continue; }
-        throw new Error(errorPuente(app, e));
+        throw new Error(errorPuente(app, e), { cause: e });
       }
     }
   }
@@ -6389,6 +6656,7 @@
     return {
       id: String(x.id), bandeja, fecha: msDe(x.fechaIngreso || x.fechaEnvioJuzgado), exp, eid: ex.id, car: limpio(ex.caratula), dep,
       desc: limpio(x.descripcion), tipo: limpio(x.tipo), fojas: x.fojas, archivo: limpio(x.nombreArchivo), estado,
+      estadoCod: limpio(String(x.estado || '')).toUpperCase(),
       acep: msDe(x.fechaAcepJuzgado),
       busq: textoBusq(exp, ex.caratula, dep, x.descripcion, x.tipo, estado, x.nombreArchivo, x.nombreAutor)
     };
@@ -6616,27 +6884,49 @@
     ? '<button class="sj-vinculo" data-a="guiaDep" data-dep="' + esc(dep) + '" title="Ver sus datos en la Guía judicial">' + esc(dep) + '</button>' + (sub || '')
     : esc(dep || '') + (sub || ''));
 
-  function celdaBandejaHTML(v, f, k) {
-    if (k === 'fecha') return f.fecha ? '<span class="sj-exp">' + esc(fechaHora(f.fecha)) + '</span>' : '';
+  // Una celda de las bandejas (1.3.8: una función por columna). Las claves son
+  // "bandeja:columna"; "*" vale para las tres bandejas.
+  const CELDAS_DE_BANDEJA = {
+    '*:fecha': (f) => (f.fecha ? '<span class="sj-exp">' + esc(fechaHora(f.fecha)) + '</span>' : ''),
     // En las notificaciones, el juzgado de radicación va con el expediente.
-    if (k === 'exp') return expCeldaHTML(f) + (v === 'notif' && f.dep && norm(f.dep) !== norm(f.emisor) ? '<div class="sj-sub">' + depGuiaHTML(f.dep) + '</div>' : '');
-    if (k === 'num') return '<span class="sj-exp">' + esc(f.num) + '</span>';
-    if (v === 'escr' && k === 'desc') {
+    '*:exp': (f, v) => expCeldaHTML(f) + (v === 'notif' && f.dep && norm(f.dep) !== norm(f.emisor) ? '<div class="sj-sub">' + depGuiaHTML(f.dep) + '</div>' : ''),
+    '*:num': (f) => '<span class="sj-exp">' + esc(f.num) + '</span>',
+    'escr:desc': (f) => {
       const sub = [f.tipo && f.tipo !== 'ESCRITO' ? f.tipo : '', f.fojas ? plural(f.fojas, 'foja', 'fojas') : '', f.archivo].filter(Boolean).join(' · ');
       return esc(f.desc) + (sub ? '<div class="sj-sub">' + esc(sub) + '</div>' : '');
-    }
-    if (v === 'escr' && k === 'dep') return depGuiaHTML(f.dep);
-    if (v === 'escr' && k === 'estado') return esc(f.estado) + (f.acep ? '<div class="sj-sub">aceptado ' + esc(fechaHora(f.acep)) + '</div>' : '');
-    if (v === 'notif' && k === 'emisor') return depGuiaHTML(f.emisor);
-    if (v === 'deox' && k === 'tipo') {
-      return esc(f.tipo) + (f.urgente ? '<span class="sj-urg">urgente</span>' : '') +
-        (f.motivo ? '<div class="sj-nota-txt sj-sub" title="' + esc(f.motivo) + '">' + esc(f.motivo) + '</div>' : '');
-    }
-    if (v === 'deox' && k === 'destino') {
-      return esc(f.destino) + (f.dep && norm(f.dep) !== norm(f.destino) ? '<div class="sj-sub">' + depGuiaHTML(f.dep) + '</div>' : '');
-    }
-    if (v === 'deox' && k === 'estado') return esc(f.estado) + (f.resp ? '<div class="sj-sub">respondido ' + esc(fechaHora(f.resp)) + '</div>' : '');
-    return esc(f[k]);
+    },
+    'escr:dep': (f) => depGuiaHTML(f.dep),
+    'escr:estado': (f) => placaEstadoHTML(f) + (f.acep ? '<div class="sj-sub">aceptado ' + esc(fechaHora(f.acep)) + '</div>' : ''),
+    'notif:emisor': (f) => depGuiaHTML(f.emisor),
+    'deox:tipo': (f) => esc(f.tipo) + (f.urgente ? '<span class="sj-urg">urgente</span>' : '') +
+      (f.motivo ? '<div class="sj-nota-txt sj-sub" title="' + esc(f.motivo) + '">' + esc(f.motivo) + '</div>' : ''),
+    'deox:destino': (f) => esc(f.destino) + (f.dep && norm(f.dep) !== norm(f.destino) ? '<div class="sj-sub">' + depGuiaHTML(f.dep) + '</div>' : ''),
+    'deox:estado': (f) => placaDeoxHTML(f) + (f.resp ? '<div class="sj-sub">respondido ' + esc(fechaHora(f.resp)) + '</div>' : '')
+  };
+  // Placas de estado (1.4.0): cada texto de estado tiene un color fijo.
+  const COLOR_ESTADO_ESCRITO = {
+    ENVIADO_A_DEPENDENCIA: 'indigo', ENVIADO_GESTIONADO: 'verde', ENVIADO_A_AUTORIZADOR: 'azul',
+    PENDIENTE: 'ambar', ENVIADO_ARCHIVADO: 'gris', ENVIADO_BORRADO: 'rojo'
+  };
+  const COLOR_ESTADO_DEOX = { Enviado: 'azul', Respondido: 'verde', Incorporado: 'verde', Cerrado: 'gris' };
+  const placaHTML = (texto, color, cod) => (texto ? '<span class="sj-estado ' + esc(color || 'gris') + '"' + (cod ? ' data-est="' + esc(cod) + '"' : '') + '>' + esc(texto) + '</span>' : '');
+  const placaEstadoHTML = (f) => placaHTML(f.estado, COLOR_ESTADO_ESCRITO[f.estadoCod] || 'gris', f.estadoCod);
+  const placaDeoxHTML = (f) => placaHTML(f.estado, COLOR_ESTADO_DEOX[f.estado] || 'gris', f.estado);
+  // Situación de la causa en la lista del PJN: el color sale de la palabra clave.
+  function colorSituacion(sit) {
+    const t = norm(sit || '');
+    if (!t) return '';
+    if (/paraliz|caduc/.test(t)) return 'rojo';
+    if (/archiv|termin|finaliz/.test(t)) return 'gris';
+    if (/despacho|resolver|sentencia|acuerdo/.test(t)) return 'ambar';
+    if (/camara|elevad|apelac|casacion|corte/.test(t)) return 'violeta';
+    if (/letra|tramite|receptoria/.test(t)) return 'verde';
+    return 'azul';
+  }
+  const placaSituacionHTML = (sit) => placaHTML(sit, colorSituacion(sit), '');
+  function celdaBandejaHTML(v, f, k) {
+    const celda = CELDAS_DE_BANDEJA['*:' + k] || CELDAS_DE_BANDEJA[v + ':' + k];
+    return celda ? celda(f, v) : esc(f[k]);
   }
 
   function tablaBandejaHTML(v, L) {
@@ -6721,8 +7011,8 @@
         ? '<span class="sj-causa" title="Solo los de esta causa, de cualquier fecha (con sus incidentes)">Causa ' + esc(B.causa.exp) +
           '<button data-a="bandSinCausa" data-v="' + v + '" title="Quitar el filtro de la causa y volver a las fechas">×</button></span>'
         : (D.rangos ? '<select data-bf="rango" title="Atajos de fechas">' + opcionesRango(B) + '</select>' : '') +
-          '<label>Desde <input type="date" data-bf="desde" value="' + esc(B.desde) + '"></label>' +
-          '<label>hasta <input type="date" data-bf="hasta" value="' + esc(B.hasta) + '"></label>') +
+          '<label>Desde ' + campoFecha('data-bf="desde"', B.desde) + '</label>' +
+          '<label>hasta ' + campoFecha('data-bf="hasta"', B.hasta) + '</label>') +
       '<button class="sj-b prim" data-a="bandConsultar" data-v="' + v + '"' + (B.estado === 'leyendo' ? ' disabled' : '') + '>Consultar</button>' +
       // Los filtros no van cuando se mira una sola causa: ahí sobran.
       (B.causa ? '' : (D.filtros || []).map((k) => {
@@ -6851,17 +7141,17 @@
 
   // -1 si el candidato no corresponde; si corresponde, cuántas palabras le
   // sobran (cuantas menos, mejor). Los números tienen que ser los mismos.
-  function puntajeGuia(q, nombre) {
+  function puntajeGuia(consulta, nombre) {
     const c = tokensGuia(nombre);
-    if (q.numeros.join(',') !== c.numeros.join(',')) return -1;
-    if (q.palabras.some((w) => !c.palabras.some((x) => x.indexOf(w) === 0))) return -1;
-    return c.palabras.filter((x) => !q.palabras.some((w) => x.indexOf(w) === 0)).length;
+    if (consulta.numeros.join(',') !== c.numeros.join(',')) return -1;
+    if (consulta.palabras.some((w) => !c.palabras.some((x) => x.indexOf(w) === 0))) return -1;
+    return c.palabras.filter((x) => !consulta.palabras.some((w) => x.indexOf(w) === 0)).length;
   }
 
   // El mejor, solo si es uno: con un empate no se adivina.
-  function mejorGuia(q, lista) {
+  function mejorGuia(consulta, lista) {
     const v = (lista || [])
-      .map((s) => ({ s, p: puntajeGuia(q, s && s.dependenciaInfo ? s.dependenciaInfo.nombre : '') }))
+      .map((s) => ({ s, p: puntajeGuia(consulta, s && s.dependenciaInfo ? s.dependenciaInfo.nombre : '') }))
       .filter((x) => x.p >= 0)
       .sort((a, b) => a.p - b.p);
     if (!v.length) return { unico: null, validos: [] };
@@ -6959,21 +7249,21 @@
   // Busca, entre las dependencias que cuelgan de d, la que nombra el
   // expediente después del guion ("SECRETARÍA NRO. 133", "SALA 5"). Mira
   // también un nivel más abajo, porque las cámaras agrupan las salas.
-  async function subGuia(d, q, gen) {
+  async function subGuia(d, consulta, gen) {
     const subs = (d && d.subDependencias) || [];
-    const directa = mejorGuia(q, subs).unico;
+    const directa = mejorGuia(consulta, subs).unico;
     if (directa) return { directa: true, sub: directa };
     // Los juzgados con una sola secretaría la tienen en la Guía como "Secretaría
     // Única", sin número: si es la única de su clase, es esa.
     const clase = subs.filter((s) => s && s.dependenciaInfo &&
-      tokensGuia(s.dependenciaInfo.nombre).palabras.some((x) => q.palabras.length && x.indexOf(q.palabras[0]) === 0));
+      tokensGuia(s.dependenciaInfo.nombre).palabras.some((x) => consulta.palabras.length && x.indexOf(consulta.palabras[0]) === 0));
     if (clase.length === 1 && /\bunica\b/.test(norm(clase[0].dependenciaInfo.nombre))) return { directa: true, sub: clase[0], unica: true };
     const grupos = subs.filter((s) => s && s.dependenciaInfo && s.codigoUrl &&
-      tokensGuia(s.dependenciaInfo.nombre).palabras.some((x) => q.palabras.some((w) => x.indexOf(w) === 0))).slice(0, 3);
+      tokensGuia(s.dependenciaInfo.nombre).palabras.some((x) => consulta.palabras.some((w) => x.indexOf(w) === 0))).slice(0, 3);
     for (const g of grupos) {
       if (gen !== GUIA.gen) return null;
       const dg = await pedirPuente('guia', { op: 'json', ruta: rutaGuia(g.codigoUrl) });
-      const s = mejorGuia(q, (dg && dg.subDependencias) || []).unico;
+      const s = mejorGuia(consulta, (dg && dg.subDependencias) || []).unico;
       if (s) return { directa: false, sub: s, grupo: g };
     }
     return null;
@@ -7141,7 +7431,7 @@
       a.style.cssText = 'position:fixed;left:-5000px;top:0';
       document.body.appendChild(a);
       a.select();
-      let fue = false;
+      let fue;
       try { fue = document.execCommand('copy'); } catch (x) { fue = false; }
       a.remove();
       avisar(fue ? 'Datos copiados.' : 'No se pudieron copiar los datos.', !fue);
@@ -7160,13 +7450,13 @@
         ? '<button class="sj-b chico" data-a="guiaAbrir" data-cod="' + esc(par.codigoUrl) + '" title="Subir un nivel">↑ ' + esc(par.dependenciaInfo.nombre) + '</button>' : '') +
       '</div>';
     const lineas = lineasDependencia(info, dep);
-    const ficha = raiz ? '<h3>Guía judicial del PJN</h3><p>Elegí una dependencia o buscá por nombre. Los datos los carga cada tribunal en la Guía del PJN.</p>'
+    const cabecera = raiz ? '<h3>Guía judicial del PJN</h3><p>Elegí una dependencia o buscá por nombre. Los datos los carga cada tribunal en la Guía del PJN.</p>'
       : '<div class="sj-guia-ficha"><h3>' + esc(info.nombre) + '</h3>' + lineasHTML(lineas) +
         '<div class="bts"><button class="sj-b chico" data-a="guiaCopiar">Copiar los datos</button>' +
         '<a class="sj-b chico" href="' + esc(guiaWeb(dep.codigoUrl)) + '" target="_blank" rel="noopener noreferrer">Ver en pjn.gov.ar ↗</a></div></div>';
     const integ = integrantesHTML(d.integrantes);
     const subs = listaDependenciasHTML(d.subDependencias, GUIA.resaltar);
-    return '<div class="sj-sec">' + nav + ficha + '</div>' +
+    return '<div class="sj-sec">' + nav + cabecera + '</div>' +
       (integ ? '<div class="sj-sec"><h4>Integrantes</h4>' + integ + '</div>' : '') +
       (subs ? '<div class="sj-sec"><h4>' + (raiz ? 'Índice' : 'Dependencias') + '</h4>' + subs + '</div>' : '');
   }
@@ -7465,8 +7755,8 @@
     win.innerHTML =
       '<div class="sj-tit" data-e="tit" title="Arrastrá para mover la ventana. Doble clic para maximizar o restaurar.">' +
       '<b>SuPJN+</b><span class="v">' + esc(APP.version) + '</span>' +
-      '<button class="fn" data-a="menuPJN">Funciones del PJN ▾</button>' +
-      '<button class="fn" data-a="recargarApp" title="Volver a cargar la página del PJN y arrancar SuPJN+ de cero">Recargar</button>' +
+      '<button class="fn" data-a="menuPJN">' + icono('\u2630') + 'Funciones del PJN ▾</button>' +
+      '<button class="fn" data-a="recargarApp" title="Volver a cargar la página del PJN y arrancar SuPJN+ de cero">' + icono('\u27F3') + 'Recargar</button>' +
       // Con qué cuenta del PJN está trabajando: los datos de cada cuenta van
       // aparte y esto es lo que dice de quién es lo que se está viendo.
       '<span class="cta' + (CUENTA ? '' : ' sin') + '" data-e="cuenta"></span>' +
@@ -7487,19 +7777,19 @@
       '<select data-f="tramite" title="Trámite"><option value="todas">En trámite y fuera de trámite</option>' +
       '<option value="si">Solo en trámite</option><option value="no">Solo fuera de trámite</option></select>' +
       '<select data-f="etiqueta" title="Etiqueta"></select>' +
-      '<label>Últ. act. desde <input type="date" data-f="desde" title="Desde"></label>' +
-      '<label>hasta <input type="date" data-f="hasta" title="Hasta"></label>' +
-      '<button class="sj-b" data-a="limpiar">Limpiar filtros</button>' +
-      '<button class="sj-b" data-a="novedades" data-e="novedades" title="Las causas que cambiaron de fecha de última actuación o de situación desde la última vez que las miraste. El PJN solo publica el día, así que dos movimientos del mismo día no se distinguen. Una causa deja de estar marcada cuando la abrís.">Novedades</button>' +
+      '<label>Últ. act. desde ' + campoFecha('data-f="desde"', '', 'Desde (dd/mm/aaaa)') + '</label>' +
+      '<label>hasta ' + campoFecha('data-f="hasta"', '', 'Hasta (dd/mm/aaaa)') + '</label>' +
+      '<button class="sj-b" data-a="limpiar">' + icono('\u2715') + 'Limpiar filtros</button>' +
+      '<button class="sj-b" data-a="novedades" data-e="novedades" title="Las causas que cambiaron de fecha de última actuación o de situación desde la última vez que las miraste. El PJN solo publica el día, así que dos movimientos del mismo día no se distinguen. Una causa deja de estar marcada cuando la abrís.">' + icono('\u25CF') + 'Novedades</button>' +
       '<button class="sj-b" data-a="vistoTodo" title="Marcar todas las causas como vistas: se borran las marcas de novedad." style="display:none">Marcar todo como visto</button>' +
       // A la derecha, separado de los filtros, lo que cambia cómo se ve la tabla.
-      '<span class="der"><button class="sj-b" data-a="menuCols">Columnas ▾</button>' +
+      '<span class="der"><button class="sj-b" data-a="menuCols">' + icono('\u25A4') + 'Columnas ▾</button>' +
       '<button class="sj-b" data-a="ordenPJNlista2" data-e="ordenPJN" title="Orden PJN: las muestra en el mismo orden en que las manda el PJN cuando se le pide la lista ordenada por FECHA, que es como las ves en el sitio.">Orden PJN</button>' +
       '<button class="sj-b" data-a="horas" title="Descarga el último documento con PDF de las causas que empatan en la fecha y obtiene la hora de la firma. De a cinco, con tope de quince por vez, y se puede cancelar.">Averiguar la hora</button>' +
       '<button class="sj-b" data-a="ordenPJNLista" data-e="ordenCrono" title="Orden cronológico: por la última actuación, de la más nueva a la más vieja. Con la misma fecha decide la hora, cuando se conoce la de todas las causas de ese día; si falta alguna, queda el orden que manda el PJN. Es el orden inicial de la lista.">Orden cronológico</button></span>' +
       '</div>' +
       '<div class="sj-est"><span class="txt" data-e="estado"></span>' +
-      '<button class="sj-b prim" data-a="actualizar" title="Vuelve a leer Mis causas y Favoritos del PJN">Actualizar</button>' +
+      '<button class="sj-b prim" data-a="actualizar" title="Vuelve a leer Mis causas y Favoritos del PJN">' + icono('\u27F3') + 'Actualizar</button>' +
       '<button class="sj-b peligro" data-a="cortarLectura" style="display:none">Cancelar</button>' +
       '<span class="sj-copia" data-a="irMarcas" data-e="copia"></span></div>' +
       '<div class="sj-accion" data-e="accion"></div>' +
@@ -7518,6 +7808,7 @@
     pastilla.style.display = 'none';
     document.body.appendChild(pastilla);
     pastilla.addEventListener('click', abrirVentana);
+    return true;
   }
 
   // Todo lo que responde a lo que se toca, se escribe, se arrastra o se
@@ -7532,312 +7823,337 @@
   }
 
   // Mover la ventana, cambiarle el tamaño y acomodar las columnas.
-  function escuchasDeLaVentana() {
+  // Mover, redimensionar y las columnas (1.3.8: partido en una función por
+  // gesto). escuchasDeLaVentana solo las registra.
 
-    // mover la ventana
-    q('[data-e="tit"]').addEventListener('mousedown', (e) => {
-      if (e.button !== 0 || e.target.closest('button') || CFG.maxi) return;
-      const r = geom();
-      const sx = e.clientX, sy = e.clientY;
-      arrastrar(e, (ev) => {
-        fijarGeom({
-          x: Math.max(120 - r.w, Math.min(anchoPantalla() - 120, r.x + ev.clientX - sx)),
-          y: Math.max(0, Math.min(altoPantalla() - 38, r.y + ev.clientY - sy))
-        });
+  // mover la ventana
+  function alArrastrarElTitulo(e) {
+    if (e.button !== 0 || e.target.closest('button') || CFG.maxi) return;
+    const r = geom();
+    const sx = e.clientX, sy = e.clientY;
+    arrastrar(e, (ev) => {
+      fijarGeom({
+        x: Math.max(120 - r.w, Math.min(anchoPantalla() - 120, r.x + ev.clientX - sx)),
+        y: Math.max(0, Math.min(altoPantalla() - 38, r.y + ev.clientY - sy))
       });
     });
-    q('[data-e="tit"]').addEventListener('dblclick', (e) => { if (!e.target.closest('button')) alternarMaxi(); });
+  }
 
-    // cambiar el tamaño
-    q('[data-e="redim"]').addEventListener('mousedown', (e) => {
-      if (e.button !== 0 || CFG.maxi) return;
-      const r = geom();
-      const sx = e.clientX, sy = e.clientY;
-      arrastrar(e, (ev) => {
-        fijarGeom({
-          w: Math.max(520, Math.min(anchoPantalla() - r.x - 2, r.w + ev.clientX - sx)),
-          h: Math.max(320, Math.min(altoPantalla() - r.y - 2, r.h + ev.clientY - sy))
-        });
-      }, () => {
-        const f = geom();
-        CFG.tam[TIPO_PAG] = { w: Math.round(f.w), h: Math.round(f.h) };
-        guardarCfg();
-        reencuadrar();
+  // cambiar el tamaño
+  function alArrastrarLaEsquina(e) {
+    if (e.button !== 0 || CFG.maxi) return;
+    const r = geom();
+    const sx = e.clientX, sy = e.clientY;
+    arrastrar(e, (ev) => {
+      fijarGeom({
+        w: Math.max(520, Math.min(anchoPantalla() - r.x - 2, r.w + ev.clientX - sx)),
+        h: Math.max(320, Math.min(altoPantalla() - r.y - 2, r.h + ev.clientY - sy))
       });
+    }, () => {
+      const f = geom();
+      CFG.tam[TIPO_PAG] = { w: Math.round(f.w), h: Math.round(f.h) };
+      guardarCfg();
+      reencuadrar();
     });
+  }
 
-    // ancho de columna: borde derecho del título
-    win.addEventListener('mousedown', (e) => {
-      const rs = e.target.closest && e.target.closest('[data-rs]');
-      if (!rs || e.button !== 0) return;
-      const k = rs.dataset.rs, tab = rs.dataset.tabla || 'lista';
-      const th = rs.closest('th');
-      const tabla = th.closest('table');
-      const cajaTabla = tabla.parentElement;
-      // Con el encuadre puesto, el ancho dibujado no es el guardado: se parte
-      // de lo que se ve en pantalla.
-      const cols = [];
-      const base = {};
-      tabla.querySelectorAll('col[data-col]').forEach((c) => {
-        cols.push(c.dataset.col);
-        const escrito = parseInt(c.style.width, 10);
-        base[c.dataset.col] = Math.max(minCol(tab, c.dataset.col), escrito || Math.round(c.getBoundingClientRect().width / zoomAct()));
-      });
-      const ancho0 = base[k];
-      const total0 = parseInt(tabla.style.width, 10) || Math.round(tabla.offsetWidth);
-      // Si la tabla ya entra justa, se mantiene así: la columna crece a costa
-      // de las otras en vez de empujar la tabla fuera de la ventana.
-      const ajustado = CFG.encuadrar && total0 <= (cajaTabla ? cajaTabla.clientWidth : 0) + 1;
-      const sx = e.clientX;
-      th.draggable = false;
-      recienRedim = true;
-      arrastrar(e, (ev) => {
-        const w = Math.max(minCol(tab, k), Math.round(ancho0 + (ev.clientX - sx) / zoomAct()));
-        const anchos = ajustado ? repartirEncuadre(tab, base, cols, k, w) : Object.assign({}, base, { [k]: w });
-        tabla.querySelectorAll('col[data-col]').forEach((c) => { c.style.width = anchos[c.dataset.col] + 'px'; });
-        // Ajustada la tabla no cambia de ancho; si no, crece o se achica con la columna.
-        if (!ajustado) tabla.style.width = Math.round(total0 - ancho0 + anchos[k]) + 'px';
-        Object.assign(CFG[TABLAS[tab].anchos], anchos);
-      }, () => {
-        th.draggable = true;
-        guardarCfg();
-        setTimeout(() => { recienRedim = false; }, 50);
-      });
-    }, true);
-
-    // mover columnas: arrastrar el título
-    win.addEventListener('dragstart', (e) => {
-      const th = e.target.closest && e.target.closest('th[data-k]');
-      if (!th) return;
-      colArrastrada = { k: th.dataset.k, tabla: th.dataset.tabla || 'lista' };
-      th.classList.add('arrastrando');
-      try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', colArrastrada.k); } catch (x) { /* sin datos */ }
+  // ancho de columna: borde derecho del título. Con el encuadre puesto, el
+  // ancho dibujado no es el guardado: se parte de lo que se ve en pantalla.
+  function anchosEnPantalla(tabla, tab) {
+    const cols = [];
+    const base = {};
+    tabla.querySelectorAll('col[data-col]').forEach((c) => {
+      cols.push(c.dataset.col);
+      const escrito = parseInt(c.style.width, 10);
+      base[c.dataset.col] = Math.max(minCol(tab, c.dataset.col), escrito || Math.round(c.getBoundingClientRect().width / zoomAct()));
     });
-    const limpiarDrop = () => win.querySelectorAll('th.drop-izq, th.drop-der').forEach((t) => t.classList.remove('drop-izq', 'drop-der'));
-    // Una columna se suelta solo dentro de su propia tabla.
-    const destinoCol = (e) => {
-      const th = e.target.closest && e.target.closest('th[data-k]');
-      return th && colArrastrada && (th.dataset.tabla || 'lista') === colArrastrada.tabla ? th : null;
-    };
-    win.addEventListener('dragover', (e) => {
-      const th = destinoCol(e);
-      if (!th) return;
-      e.preventDefault();
-      try { e.dataTransfer.dropEffect = 'move'; } catch (x) { /* sin efecto */ }
+    return { cols, base };
+  }
+  function alArrastrarElBordeDeColumna(e) {
+    const rs = e.target.closest && e.target.closest('[data-rs]');
+    if (!rs || e.button !== 0) return;
+    const k = rs.dataset.rs, tab = rs.dataset.tabla || 'lista';
+    const th = rs.closest('th');
+    const tabla = th.closest('table');
+    const cajaTabla = tabla.parentElement;
+    const { cols, base } = anchosEnPantalla(tabla, tab);
+    const ancho0 = base[k];
+    const total0 = parseInt(tabla.style.width, 10) || Math.round(tabla.offsetWidth);
+    // Si la tabla ya entra justa, se mantiene así: la columna crece a costa
+    // de las otras en vez de empujar la tabla fuera de la ventana.
+    const ajustado = CFG.encuadrar && total0 <= (cajaTabla ? cajaTabla.clientWidth : 0) + 1;
+    const sx = e.clientX;
+    th.draggable = false;
+    recienRedim = true;
+    arrastrar(e, (ev) => {
+      const w = Math.max(minCol(tab, k), Math.round(ancho0 + (ev.clientX - sx) / zoomAct()));
+      const anchos = ajustado ? repartirEncuadre(tab, base, cols, k, w) : Object.assign({}, base, { [k]: w });
+      tabla.querySelectorAll('col[data-col]').forEach((c) => { c.style.width = anchos[c.dataset.col] + 'px'; });
+      // Ajustada la tabla no cambia de ancho; si no, crece o se achica con la columna.
+      if (!ajustado) tabla.style.width = Math.round(total0 - ancho0 + anchos[k]) + 'px';
+      Object.assign(CFG[TABLAS[tab].anchos], anchos);
+    }, () => {
+      th.draggable = true;
+      guardarCfg();
+      setTimeout(() => { recienRedim = false; }, 50);
+    });
+  }
+
+  // mover columnas: arrastrar el título
+  const limpiarMarcasDeSoltar = () => win.querySelectorAll('th.drop-izq, th.drop-der').forEach((t) => t.classList.remove('drop-izq', 'drop-der'));
+  // Una columna se suelta solo dentro de su propia tabla.
+  function columnaDestino(e) {
+    const th = e.target.closest && e.target.closest('th[data-k]');
+    return th && colArrastrada && (th.dataset.tabla || 'lista') === colArrastrada.tabla ? th : null;
+  }
+  function alEmpezarAArrastrarColumna(e) {
+    const th = e.target.closest && e.target.closest('th[data-k]');
+    if (!th) return;
+    colArrastrada = { k: th.dataset.k, tabla: th.dataset.tabla || 'lista' };
+    th.classList.add('arrastrando');
+    try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', colArrastrada.k); } catch (x) { /* sin datos */ }
+  }
+  function alPasarColumnaPorEncima(e) {
+    const th = columnaDestino(e);
+    if (!th) return;
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = 'move'; } catch (x) { /* sin efecto */ }
+    const r = th.getBoundingClientRect();
+    const der = e.clientX > r.left + r.width / 2;
+    limpiarMarcasDeSoltar();
+    if (th.dataset.k !== colArrastrada.k) th.classList.add(der ? 'drop-der' : 'drop-izq');
+  }
+  function alSoltarColumna(e) {
+    if (!colArrastrada) return;
+    const th = columnaDestino(e);
+    e.preventDefault();
+    const { k, tabla } = colArrastrada;
+    colArrastrada = null;
+    limpiarMarcasDeSoltar();
+    if (th && th.dataset.k !== k) {
       const r = th.getBoundingClientRect();
-      const der = e.clientX > r.left + r.width / 2;
-      limpiarDrop();
-      if (th.dataset.k !== colArrastrada.k) th.classList.add(der ? 'drop-der' : 'drop-izq');
-    });
-    win.addEventListener('drop', (e) => {
-      if (!colArrastrada) return;
-      const th = destinoCol(e);
-      e.preventDefault();
-      const { k, tabla } = colArrastrada;
-      colArrastrada = null;
-      limpiarDrop();
-      if (th && th.dataset.k !== k) {
-        const r = th.getBoundingClientRect();
-        moverColumna(tabla, k, th.dataset.k, e.clientX > r.left + r.width / 2);
-      }
-      repintarTabla(tabla);
-    });
-    win.addEventListener('dragend', () => {
-      colArrastrada = null;
-      limpiarDrop();
-      win.querySelectorAll('th.arrastrando').forEach((t) => t.classList.remove('arrastrando'));
-    });
+      moverColumna(tabla, k, th.dataset.k, e.clientX > r.left + r.width / 2);
+    }
+    repintarTabla(tabla);
+  }
+  function alTerminarDeArrastrarColumna() {
+    colArrastrada = null;
+    limpiarMarcasDeSoltar();
+    win.querySelectorAll('th.arrastrando').forEach((t) => t.classList.remove('arrastrando'));
+  }
 
+  function escuchasDeLaVentana() {
+    q('[data-e="tit"]').addEventListener('mousedown', alArrastrarElTitulo);
+    q('[data-e="tit"]').addEventListener('dblclick', (e) => { if (!e.target.closest('button')) alternarMaxi(); });
+    q('[data-e="redim"]').addEventListener('mousedown', alArrastrarLaEsquina);
+    win.addEventListener('mousedown', alArrastrarElBordeDeColumna, true);
+    win.addEventListener('dragstart', alEmpezarAArrastrarColumna);
+    win.addEventListener('dragover', alPasarColumnaPorEncima);
+    win.addEventListener('drop', alSoltarColumna);
+    win.addEventListener('dragend', alTerminarDeArrastrarColumna);
   }
 
   // Los filtros, los buscadores, los desplegables y el teclado.
+  // Los cambios en los campos de la ventana (1.3.8: partido en una función por
+  // campo). Al escribir en una búsqueda se espera un instante después de la
+  // última letra antes de redibujar; los desplegables y las fechas se aplican
+  // de inmediato.
+  const ESPERA_BUSQUEDA = 120;
+  const ESPERAS_DE_ESCRITURA = { lista: null, elegir: null, bandeja: null };
+
+  // filtros de la lista
+  function alEscribirFiltroDeLista(e) {
+    const f = e.target.dataset && e.target.dataset.f;
+    if (!f) return;
+    const v = valorDeCampo(e.target);
+    if (v === null) return;   // fecha a medio escribir
+    CFG[f] = v;
+    PAGINA_VISTA[VISTA === 'fav' ? 'fav' : 'rel'] = 1;
+    abierta = null;
+    clearTimeout(ESPERAS_DE_ESCRITURA.lista);
+    const aplicar = () => { guardarCfg(); pintarTabla(); };
+    if (f === 'texto') ESPERAS_DE_ESCRITURA.lista = setTimeout(aplicar, ESPERA_BUSQUEDA); else aplicar();
+  }
+
+  // filtros de elegir actuaciones: se redibuja el cuadro sin perder el foco ni el cursor
+  function redibujarElegirConservandoElFoco(id, ef) {
+    const actual = q('[data-elegir="' + id + '"] [data-ef="' + ef + '"]');
+    const enFoco = !!actual && actual === document.activeElement;
+    const pos = enFoco ? actual.selectionStart : null;
+    pintarElegir(id);
+    const nuevo = q('[data-elegir="' + id + '"] [data-ef="' + ef + '"]');
+    if (nuevo && enFoco) { nuevo.focus(); try { const p = ef === 'texto' ? pos : nuevo.value.length; nuevo.setSelectionRange(p, p); } catch (x) { /* sin cursor */ } }
+  }
+  function alEscribirFiltroDeElegir(e) {
+    const ef = e.target.dataset && e.target.dataset.ef;
+    if (!ef) return;
+    const id = e.target.closest('[data-elegir]').dataset.elegir;
+    const ctx = ctxElegir(id);
+    if (!ctx) return;
+    const v = valorDeCampo(e.target);
+    if (v === null) return;   // fecha a medio escribir
+    ctx.filtro[ef] = v;
+    clearTimeout(ESPERAS_DE_ESCRITURA.elegir);
+    const aplicar = () => redibujarElegirConservandoElFoco(id, ef);
+    if (ef === 'texto') ESPERAS_DE_ESCRITURA.elegir = setTimeout(aplicar, ESPERA_BUSQUEDA); else aplicar();
+  }
+
+  // Bandejas (Escritos, Notificaciones, DEOX) y Guía.
+  function alEscribirEnBandeja(t, bf) {
+    const cont = t.closest('[data-band]');
+    if (!cont) return;
+    const v = cont.dataset.band, B = BAND[v];
+    if (bf === 'texto') {
+      B.texto = t.value;
+      B.pagina = 1;
+      clearTimeout(ESPERAS_DE_ESCRITURA.bandeja);
+      ESPERAS_DE_ESCRITURA.bandeja = setTimeout(() => pintarCuerpoBandeja(v), ESPERA_BUSQUEDA);
+    } else if (bf === 'desde' || bf === 'hasta') {
+      const fecha = valorDeCampo(t);
+      if (fecha === null) return;   // fecha a medio escribir
+      B[bf] = fecha;
+      // El atajo de fechas acompaña a lo que se escriba a mano.
+      const r = cont.querySelector('[data-bf="rango"]');
+      if (r) r.value = rangoActual(B);
+    }
+  }
+  function alEscribirEnBandejasYGuia(e) {
+    const t = e.target;
+    const bf = t.dataset && t.dataset.bf;
+    if (bf) { alEscribirEnBandeja(t, bf); return; }
+    if (t.dataset && t.dataset.gf === 'texto') GUIA.texto = t.value;
+  }
+
+  // Los cambios de los desplegables y casillas, uno por función. Cada entrada
+  // es [selector, función]; se aplica la primera que coincide con el campo.
+  function cambioBandejaElegida(t) {
+    const cont = t.closest('[data-band]');
+    if (!cont) return;
+    BAND[cont.dataset.band].bandeja = t.value;
+    consultarBandeja(cont.dataset.band);
+  }
+  // Los filtros trabajan sobre lo ya consultado: no se le vuelve a pedir
+  // nada al PJN.
+  function cambioFiltroDeBandeja(t) {
+    const cont = t.closest('[data-band]');
+    if (!cont) return;
+    const v = cont.dataset.band;
+    BAND[v].filtros[t.dataset.k] = t.value;
+    BAND[v].pagina = 1;
+    pintarCuerpoBandeja(v);
+  }
+  // Un atajo de fechas sí cambia lo que se le pide al PJN, así que consulta.
+  function cambioRangoDeBandeja(t) {
+    const cont = t.closest('[data-band]');
+    if (!cont) return;
+    const v = cont.dataset.band, R = RANGOS.find((x) => x[0] === t.value);
+    if (!R) return;          // "Otras fechas": las fechas quedan como están
+    BAND[v].desde = R[2]();
+    BAND[v].hasta = hoyISO();
+    consultarBandeja(v);
+  }
+  function cambioModoDeGuia(t) {
+    GUIA.modo = t.value === 'per' ? 'per' : 'dep';
+    const campo = q('[data-gf="texto"]');
+    if (campo) campo.placeholder = GUIA.modo === 'per' ? 'Apellido' : 'Por ejemplo: civil 74, correccional 11, casación penal';
+  }
+  function cambioPorPagina(t) {
+    CFG.porPagina = parseInt(t.value, 10) || 25;
+    PAGINA_VISTA.rel = 1;
+    PAGINA_VISTA.fav = 1;
+    guardarCfg();
+    pintarTabla();
+  }
+  function cambioSeleccionDeFila(t) {
+    const s = selVista();
+    if (t.checked) s.add(t.dataset.sel); else s.delete(t.dataset.sel);
+    const tr = t.closest('tr');
+    if (tr) tr.classList.toggle('sel', t.checked);
+    const todas = q('[data-a="selTodas"]');
+    if (todas) { const L = filtradas(); todas.checked = L.length > 0 && L.every((c) => s.has(c.exp)); }
+    pintarAccion();
+  }
+  function cambioSeleccionDeTodas(t) {
+    const s = selVista();
+    filtradas().forEach((c) => { if (t.checked) s.add(c.exp); else s.delete(c.exp); });
+    pintarTabla();
+    pintarAccion();
+  }
+  function cambioEncuadrar(t) {
+    CFG.encuadrar = !!t.checked;
+    guardarCfg();
+    repintarTabla('lista');
+    repintarTabla('act');
+  }
+  function cambioColumnaVisible(t) {
+    const k = t.dataset.colvis, tab = t.dataset.tabla || 'lista';
+    const claveOcultas = TABLAS[tab].ocultas;
+    CFG[claveOcultas] = CFG[claveOcultas].filter((x) => x !== k);
+    if (!t.checked) {
+      if (columnasVisibles(tab).length <= 1) { t.checked = true; return; }
+      CFG[claveOcultas].push(k);
+    }
+    guardarCfg();
+    repintarTabla(tab);
+  }
+  function cambioActuacionElegida(t) {
+    const cont = t.closest('[data-elegir]');
+    const ctx = ctxElegir(cont.dataset.elegir);
+    if (!ctx) return;
+    const i = parseInt(t.dataset.ei, 10);
+    if (t.checked) ctx.elegidas.add(i); else ctx.elegidas.delete(i);
+    actualizarCuentaElegir(cont.dataset.elegir);
+  }
+  function cambioPausaDeNota(t) {
+    CFG.pausaNota = Math.max(300, parseInt(t.value, 10) || 700);
+    guardarCfg();
+  }
+  const CAMBIOS_DE_CAMPO = [
+    ['[data-bf="bandeja"]', cambioBandejaElegida], ['[data-bf="filtro"]', cambioFiltroDeBandeja], ['[data-bf="rango"]', cambioRangoDeBandeja],
+    ['[data-gf="modo"]', cambioModoDeGuia], ['[data-pp]', cambioPorPagina], ['[data-sel]', cambioSeleccionDeFila],
+    ['[data-a="selTodas"]', cambioSeleccionDeTodas], ['[data-enc]', cambioEncuadrar], ['[data-colvis]', cambioColumnaVisible],
+    ['[data-ei]', cambioActuacionElegida], ['[data-e="pausa"]', cambioPausaDeNota]
+  ];
+  function alCambiarCampo(e) {
+    const t = e.target;
+    const entrada = CAMBIOS_DE_CAMPO.find(([selector]) => t.matches(selector));
+    if (entrada) entrada[1](t);
+  }
+
+  // anotación: al salir del campo se guarda
+  function alSalirDeLaAnotacion(e) {
+    if (!e.target.classList || !e.target.classList.contains('sj-nota')) return;
+    const caja = e.target.closest('[data-marca]');
+    if (!caja || e.target.value === (marcaDe(caja.dataset.marca).nota || '')) return;
+    fijarMarca(caja.dataset.marca, { nota: e.target.value });
+    const ok = caja.querySelector('.sj-ok');
+    if (ok) { ok.classList.add('si'); setTimeout(() => ok.classList.remove('si'), 2200); }
+    pintarCopia();
+  }
+
+  function alTeclaEnCampo(e) {
+    const ds = (e.target && e.target.dataset) || {};
+    if (e.key === 'Enter' && ds.gf === 'texto') { e.preventDefault(); guiaBuscar(); return; }
+    if (e.key === 'Enter' && (ds.bf === 'desde' || ds.bf === 'hasta')) {
+      const cont = e.target.closest('[data-band]');
+      if (cont) { e.preventDefault(); alSalirDeCampoFecha(e); const v = valorDeCampo(e.target); if (v === null) return; BAND[cont.dataset.band][ds.bf] = v; consultarBandeja(cont.dataset.band); }
+      return;
+    }
+    if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('sj-et-nombre')) {
+      e.preventDefault();
+      const b = e.target.closest('[data-marca]').querySelector('[data-a="crearEt"]');
+      if (b) b.click();
+    }
+  }
+
   function escuchasDeLosCampos() {
-    // Al escribir en una búsqueda se espera un instante después de la última
-    // letra antes de redibujar; los desplegables y las fechas se aplican de inmediato.
-    const ESPERA_BUSQUEDA = 120;
-    let tBuscar = null, tElegir = null;
-
-    // filtros de la lista
-    win.querySelector('.sj-barra').addEventListener('input', (e) => {
-      const f = e.target.dataset && e.target.dataset.f;
-      if (!f) return;
-      CFG[f] = e.target.value;
-      PAGINA_VISTA[VISTA === 'fav' ? 'fav' : 'rel'] = 1;
-      abierta = null;
-      clearTimeout(tBuscar);
-      const aplicar = () => { guardarCfg(); pintarTabla(); };
-      if (f === 'texto') tBuscar = setTimeout(aplicar, ESPERA_BUSQUEDA); else aplicar();
-    });
-
-    // filtros de elegir actuaciones
-    win.addEventListener('input', (e) => {
-      const ef = e.target.dataset && e.target.dataset.ef;
-      if (!ef) return;
-      const cont = e.target.closest('[data-elegir]');
-      const id = cont.dataset.elegir;
-      const ctx = ctxElegir(id);
-      if (!ctx) return;
-      ctx.filtro[ef] = e.target.value;
-      clearTimeout(tElegir);
-      const aplicar = () => {
-        const actual = q('[data-elegir="' + id + '"] [data-ef="' + ef + '"]');
-        const enFoco = !!actual && actual === document.activeElement;
-        const pos = enFoco ? actual.selectionStart : null;
-        pintarElegir(id);
-        const nuevo = q('[data-elegir="' + id + '"] [data-ef="' + ef + '"]');
-        if (nuevo && enFoco) { nuevo.focus(); try { if (ef === 'texto') nuevo.setSelectionRange(pos, pos); } catch (x) { /* fecha */ } }
-      };
-      if (ef === 'texto') tElegir = setTimeout(aplicar, ESPERA_BUSQUEDA); else aplicar();
-    });
-
-    // Bandejas (Escritos, Notificaciones, DEOX) y Guía.
-    let tBandeja = null;
-    win.addEventListener('input', (e) => {
-      const t = e.target;
-      const bf = t.dataset && t.dataset.bf;
-      if (bf) {
-        const cont = t.closest('[data-band]');
-        if (!cont) return;
-        const v = cont.dataset.band, B = BAND[v];
-        if (bf === 'texto') {
-          B.texto = t.value;
-          B.pagina = 1;
-          clearTimeout(tBandeja);
-          tBandeja = setTimeout(() => pintarCuerpoBandeja(v), ESPERA_BUSQUEDA);
-        } else if (bf === 'desde' || bf === 'hasta') {
-          B[bf] = t.value;
-          // El atajo de fechas acompaña a lo que se escriba a mano.
-          const r = cont.querySelector('[data-bf="rango"]');
-          if (r) r.value = rangoActual(B);
-        }
-        return;
-      }
-      if (t.dataset && t.dataset.gf === 'texto') GUIA.texto = t.value;
-    });
-
-    win.addEventListener('change', (e) => {
-      const t = e.target;
-      if (t.matches('[data-bf="bandeja"]')) {
-        const cont = t.closest('[data-band]');
-        if (!cont) return;
-        BAND[cont.dataset.band].bandeja = t.value;
-        consultarBandeja(cont.dataset.band);
-        return;
-      }
-      // Los filtros trabajan sobre lo ya consultado: no se le vuelve a pedir
-      // nada al PJN.
-      if (t.matches('[data-bf="filtro"]')) {
-        const cont = t.closest('[data-band]');
-        if (!cont) return;
-        const v = cont.dataset.band;
-        BAND[v].filtros[t.dataset.k] = t.value;
-        BAND[v].pagina = 1;
-        pintarCuerpoBandeja(v);
-        return;
-      }
-      // Un atajo de fechas sí cambia lo que se le pide al PJN, así que consulta.
-      if (t.matches('[data-bf="rango"]')) {
-        const cont = t.closest('[data-band]');
-        if (!cont) return;
-        const v = cont.dataset.band, R = RANGOS.find((x) => x[0] === t.value);
-        if (!R) return;          // "Otras fechas": las fechas quedan como están
-        BAND[v].desde = R[2]();
-        BAND[v].hasta = hoyISO();
-        consultarBandeja(v);
-        return;
-      }
-      if (t.matches('[data-gf="modo"]')) {
-        GUIA.modo = t.value === 'per' ? 'per' : 'dep';
-        const campo = q('[data-gf="texto"]');
-        if (campo) campo.placeholder = GUIA.modo === 'per' ? 'Apellido' : 'Por ejemplo: civil 74, correccional 11, casación penal';
-        return;
-      }
-      if (t.matches('[data-pp]')) {
-        CFG.porPagina = parseInt(t.value, 10) || 25;
-        PAGINA_VISTA.rel = 1;
-        PAGINA_VISTA.fav = 1;
-        guardarCfg();
-        pintarTabla();
-        return;
-      }
-      if (t.matches('[data-sel]')) {
-        const s = selVista();
-        if (t.checked) s.add(t.dataset.sel); else s.delete(t.dataset.sel);
-        const tr = t.closest('tr');
-        if (tr) tr.classList.toggle('sel', t.checked);
-        const todas = q('[data-a="selTodas"]');
-        if (todas) { const L = filtradas(); todas.checked = L.length > 0 && L.every((c) => s.has(c.exp)); }
-        pintarAccion();
-        return;
-      }
-      if (t.matches('[data-a="selTodas"]')) {
-        const s = selVista();
-        const L = filtradas();
-        L.forEach((c) => { if (t.checked) s.add(c.exp); else s.delete(c.exp); });
-        pintarTabla();
-        pintarAccion();
-        return;
-      }
-      if (t.matches('[data-enc]')) {
-        CFG.encuadrar = !!t.checked;
-        guardarCfg();
-        repintarTabla('lista');
-        repintarTabla('act');
-        return;
-      }
-      if (t.matches('[data-colvis]')) {
-        const k = t.dataset.colvis, tab = t.dataset.tabla || 'lista';
-        const clave = TABLAS[tab].ocultas;
-        CFG[clave] = CFG[clave].filter((x) => x !== k);
-        if (!t.checked) {
-          if (columnasVisibles(tab).length <= 1) { t.checked = true; return; }
-          CFG[clave].push(k);
-        }
-        guardarCfg();
-        repintarTabla(tab);
-        return;
-      }
-      if (t.matches('[data-ei]')) {
-        const cont = t.closest('[data-elegir]');
-        const ctx = ctxElegir(cont.dataset.elegir);
-        if (!ctx) return;
-        const i = parseInt(t.dataset.ei, 10);
-        if (t.checked) ctx.elegidas.add(i); else ctx.elegidas.delete(i);
-        actualizarCuentaElegir(cont.dataset.elegir);
-        return;
-      }
-      if (t.matches('[data-e="pausa"]')) {
-        CFG.pausaNota = Math.max(300, parseInt(t.value, 10) || 700);
-        guardarCfg();
-      }
-    });
-
-    // anotación: al salir del campo se guarda
-    win.addEventListener('focusout', (e) => {
-      if (!e.target.classList || !e.target.classList.contains('sj-nota')) return;
-      const caja = e.target.closest('[data-marca]');
-      if (!caja || e.target.value === (marcaDe(caja.dataset.marca).nota || '')) return;
-      fijarMarca(caja.dataset.marca, { nota: e.target.value });
-      const ok = caja.querySelector('.sj-ok');
-      if (ok) { ok.classList.add('si'); setTimeout(() => ok.classList.remove('si'), 2200); }
-      pintarCopia();
-    });
-
-    win.addEventListener('keydown', (e) => {
-      const ds = (e.target && e.target.dataset) || {};
-      if (e.key === 'Enter' && ds.gf === 'texto') { e.preventDefault(); guiaBuscar(); return; }
-      if (e.key === 'Enter' && (ds.bf === 'desde' || ds.bf === 'hasta')) {
-        const cont = e.target.closest('[data-band]');
-        if (cont) { e.preventDefault(); BAND[cont.dataset.band][ds.bf] = e.target.value; consultarBandeja(cont.dataset.band); }
-        return;
-      }
-      if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('sj-et-nombre')) {
-        e.preventDefault();
-        const b = e.target.closest('[data-marca]').querySelector('[data-a="crearEt"]');
-        if (b) b.click();
-      }
-    });
-
+    win.querySelector('.sj-barra').addEventListener('input', alEscribirFiltroDeLista);
+    win.addEventListener('input', alEscribirFiltroDeElegir);
+    win.addEventListener('input', alEscribirEnBandejasYGuia);
+    win.addEventListener('change', alCambiarCampo);
+    win.addEventListener('focusout', alSalirDeLaAnotacion);
+    win.addEventListener('focusout', alSalirDeCampoFecha);
+    win.addEventListener('keydown', alTeclaEnCampo);
   }
 
   // El archivo que se importa y el clic sobre cualquier cosa de la ventana.
@@ -8000,447 +8316,470 @@
   // de la fila y de la tabla (que van antes que los botones, porque un botón
   // puede estar adentro de una fila marcada), después la acción del botón, y
   // al final lo de las etiquetas y anotaciones.
-  function alClic(e) {
-    const t = e.target;
-
+  // El clic en la ventana (1.3.8: partido en una función por zona). Cada
+  // función recibe el elemento tocado y el evento, y devuelve true si atendió
+  // el clic; alClic las prueba en orden y se detiene en la primera que lo hizo.
+  function clicEnMenu(t) {
     // Un enlace del menú abre su pestaña y el menú se cierra solo. Se lo cierra
     // después del clic: quitarlo durante el clic podría cortar la apertura.
-    const vinculoMenu = t.closest('.sj-menu a.it');
-    if (vinculoMenu) { setTimeout(cerrarMenu, 0); return; }
-
+    if (!t.closest('.sj-menu a.it')) return false;
+    setTimeout(cerrarMenu, 0);
+    return true;
+  }
+  function clicEnSolapas(t) {
     // La cruz de la solapa va antes que la solapa: está adentro del botón.
-    const cx = t.closest('[data-cerrar]');
-    if (cx) { cerrarSolapaExp(); return; }
-
+    if (t.closest('[data-cerrar]')) { cerrarSolapaExp(); return true; }
     const sol = t.closest('[data-vista]');
-    if (sol) { irAVista(sol.dataset.vista); return; }
-
+    if (!sol) return false;
+    irAVista(sol.dataset.vista);
+    return true;
+  }
+  function clicEnOrdenDeBandeja(t) {
     const bo = t.closest('th[data-bo]');
-    if (bo) { ordenarBandeja(bo.dataset.v, bo.dataset.bo); return; }
-
+    if (!bo) return false;
+    ordenarBandeja(bo.dataset.v, bo.dataset.bo);
+    return true;
+  }
+  function clicEnPaginaDeBandeja(t) {
     const bp = t.closest('[data-bpag]');
-    if (bp) {
-      if (bp.disabled) return;
-      BAND[bp.dataset.v].pagina = parseInt(bp.dataset.bpag, 10) || 1;
-      pintarCuerpoBandeja(bp.dataset.v);
-      const cb = q('[data-e="bandCuerpo"]');
-      if (cb) cb.scrollTop = 0;
-      return;
-    }
-
+    if (!bp) return false;
+    if (bp.disabled) return true;
+    BAND[bp.dataset.v].pagina = parseInt(bp.dataset.bpag, 10) || 1;
+    pintarCuerpoBandeja(bp.dataset.v);
+    const cb = q('[data-e="bandCuerpo"]');
+    if (cb) cb.scrollTop = 0;
+    return true;
+  }
+  function clicEnTituloDeColumna(t) {
     const th = t.closest('th[data-k]');
-    if (th && !t.closest('[data-rs]')) {
-      if (recienRedim) return;
-      const tab = th.dataset.tabla || 'lista';
-      alternarOrden(tab, th.dataset.k);
-      repintarTabla(tab);
-      return;
-    }
-
+    if (!th || t.closest('[data-rs]')) return false;
+    if (recienRedim) return true;
+    const tab = th.dataset.tabla || 'lista';
+    alternarOrden(tab, th.dataset.k);
+    repintarTabla(tab);
+    return true;
+  }
+  function clicEnPaginaDeLista(t) {
     const pg = t.closest('[data-pag]');
-    if (pg && !pg.disabled) {
-      PAGINA_VISTA[VISTA === 'fav' ? 'fav' : 'rel'] = parseInt(pg.dataset.pag, 10) || 1;
-      abierta = null;
-      pintarTabla();
-      q('[data-e="cuerpo"]').scrollTop = 0;
-      return;
-    }
-
+    if (!pg || pg.disabled) return false;
+    PAGINA_VISTA[VISTA === 'fav' ? 'fav' : 'rel'] = parseInt(pg.dataset.pag, 10) || 1;
+    abierta = null;
+    pintarTabla();
+    q('[data-e="cuerpo"]').scrollTop = 0;
+    return true;
+  }
+  function clicEnAbrirCausa(t, e) {
     const abn = t.closest('[data-abrirnueva]');
-    if (abn) { abrirCausa(abn.dataset.abrirnueva, true); return; }
-
+    if (abn) { abrirCausa(abn.dataset.abrirnueva, true); return true; }
     const ab = t.closest('[data-abrir]');
-    if (ab) { abrirCausa(ab.dataset.abrir, !!(e.ctrlKey || e.metaKey)); return; }
-
+    if (!ab) return false;
+    abrirCausa(ab.dataset.abrir, !!(e.ctrlKey || e.metaKey));
+    return true;
+  }
+  function clicEnMasDeLaFila(t) {
     const mas = t.closest('[data-mas]');
-    if (mas) {
-      if (menuAbierto && menuAbierto.dataset.ancla === mas.dataset.mas) { cerrarMenu(); return; }
-      abrirMenu(mas, menuFilaHTML(mas.dataset.mas));
-      return;
-    }
-
+    if (!mas) return false;
+    if (menuAbierto && menuAbierto.dataset.ancla === mas.dataset.mas) { cerrarMenu(); return true; }
+    abrirMenu(mas, menuFilaHTML(mas.dataset.mas));
+    return true;
+  }
+  function clicEnDetalleDeLaFila(t) {
     const det = t.closest('[data-det]');
-    if (det) {
-      guardarNotaAbierta();
-      abierta = abierta === det.dataset.det ? null : det.dataset.det;
-      pintarTabla();
-      const caja = abierta && q('.sj-det-in[data-marca]');
-      if (caja) {
-        const campo = caja.querySelector(det.dataset.foco === 'nota' ? '.sj-nota' : '.sj-et-nombre');
-        caja.scrollIntoView({ block: 'nearest' });
-        if (campo) campo.focus();
-      }
-      return;
+    if (!det) return false;
+    guardarNotaAbierta();
+    abierta = abierta === det.dataset.det ? null : det.dataset.det;
+    pintarTabla();
+    const caja = abierta && q('.sj-det-in[data-marca]');
+    if (caja) {
+      const campo = caja.querySelector(det.dataset.foco === 'nota' ? '.sj-nota' : '.sj-et-nombre');
+      caja.scrollIntoView({ block: 'nearest' });
+      if (campo) campo.focus();
     }
-
+    return true;
+  }
+  function clicEnColorDeEtiqueta(t) {
     const colBtn = t.closest('.sj-col');
-    if (colBtn) {
-      colorElegido = colBtn.dataset.color;
-      colBtn.parentElement.querySelectorAll('.sj-col').forEach((b) => b.classList.toggle('sel', b === colBtn));
-      return;
-    }
-
+    if (!colBtn) return false;
+    colorElegido = colBtn.dataset.color;
+    colBtn.parentElement.querySelectorAll('.sj-col').forEach((b) => b.classList.toggle('sel', b === colBtn));
+    return true;
+  }
+  function clicEnChipDeEtiqueta(t) {
     const chip = t.closest('button[data-et]');
-    if (chip) {
-      const caja = chip.closest('[data-marca]');
-      guardarNotaAbierta();
-      alternarEtiqueta(caja.dataset.marca, chip.dataset.et);
-      if (VISTA === 'exp') pintarExpediente(); else pintarTabla();
-      pintarCopia();
-      return;
-    }
+    if (!chip) return false;
+    const caja = chip.closest('[data-marca]');
+    guardarNotaAbierta();
+    alternarEtiqueta(caja.dataset.marca, chip.dataset.et);
+    if (VISTA === 'exp') pintarExpediente(); else pintarTabla();
+    pintarCopia();
+    return true;
+  }
 
+  // Las acciones del cuadro "elegir actuaciones", una función por acción.
+  // Reciben el contexto del cuadro (ctx), su identificador (id), las
+  // actuaciones a la vista (V) y el control tocado (ea).
+  const ACCIONES_DE_ELEGIR = {
+    todas(ctx, id, V) { V.forEach((i) => ctx.elegidas.add(i)); pintarElegir(id); },
+    ninguna(ctx, id, V) { V.forEach((i) => ctx.elegidas.delete(i)); pintarElegir(id); },
+    invertir(ctx, id, V) { V.forEach((i) => { if (ctx.elegidas.has(i)) ctx.elegidas.delete(i); else ctx.elegidas.add(i); }); pintarElegir(id); },
+    todasCb(ctx, id, V, ea) {
+      if (ea.checked) V.forEach((i) => ctx.elegidas.add(i)); else V.forEach((i) => ctx.elegidas.delete(i));
+      pintarElegir(id);
+    },
+    ordenPJN(ctx, id) { CFG.ordenAct = { col: '', desc: true }; guardarCfg(); pintarElegir(id); },
+    bajarElegidas(ctx, id) {
+      const idx = [...ctx.elegidas].sort((x, y) => x - y);
+      trabajoDesdeElegir(id, idx.map((i) => ctx.acts[i].url), idx.length < ctx.acts.length);
+    },
+    bajarTodo(ctx, id) { trabajoDesdeElegir(id, ctx.acts.map((x) => x.url), false); },
+    bajarUna(ctx, id, V, ea) { bajarUnaActuacion(id, parseInt(ea.dataset.i, 10)); },
+    releer() { leerExpedienteActual(); },
+    descartar(ctx, id) {
+      const i = COLA.findIndex((x) => x.id === id);
+      if (i >= 0) COLA.splice(i, 1);
+      pintarDescargas();
+    }
+  };
+  function clicEnElegirActuaciones(t) {
     const ea = t.closest('[data-ea]');
-    if (ea && !ea.disabled) {
-      const cont = ea.closest('[data-elegir]');
-      const id = cont.dataset.elegir;
-      const ctx = ctxElegir(id);
-      if (!ctx) return;
-      const a = ea.dataset.ea;
-      const V = actsFiltradas(ctx);
-      if (a === 'todas') V.forEach((i) => ctx.elegidas.add(i));
-      if (a === 'ninguna') V.forEach((i) => ctx.elegidas.delete(i));
-      if (a === 'invertir') V.forEach((i) => { if (ctx.elegidas.has(i)) ctx.elegidas.delete(i); else ctx.elegidas.add(i); });
-      if (a === 'todasCb') {
-        if (ea.checked) V.forEach((i) => ctx.elegidas.add(i)); else V.forEach((i) => ctx.elegidas.delete(i));
-        pintarElegir(id);
-        return;
-      }
-      if (a === 'todas' || a === 'ninguna' || a === 'invertir') { pintarElegir(id); return; }
-      if (a === 'ordenPJN') { CFG.ordenAct = { col: '', desc: true }; guardarCfg(); pintarElegir(id); return; }
-      if (a === 'bajarElegidas') {
-        const idx = [...ctx.elegidas].sort((x, y) => x - y);
-        trabajoDesdeElegir(id, idx.map((i) => ctx.acts[i].url), idx.length < ctx.acts.length);
-        return;
-      }
-      if (a === 'bajarTodo') { trabajoDesdeElegir(id, ctx.acts.map((x) => x.url), false); return; }
-      if (a === 'bajarUna') { bajarUnaActuacion(id, parseInt(ea.dataset.i, 10)); return; }
-      if (a === 'releer') { leerExpedienteActual(); return; }
-      if (a === 'descartar') {
-        const i = COLA.findIndex((x) => x.id === id);
-        if (i >= 0) COLA.splice(i, 1);
-        pintarDescargas();
-      }
-      return;
-    }
+    if (!ea || ea.disabled) return false;
+    const id = ea.closest('[data-elegir]').dataset.elegir;
+    const ctx = ctxElegir(id);
+    if (!ctx) return true;
+    const a = ea.dataset.ea;
+    if (Object.prototype.hasOwnProperty.call(ACCIONES_DE_ELEGIR, a)) ACCIONES_DE_ELEGIR[a](ctx, id, actsFiltradas(ctx), ea);
+    return true;
+  }
 
+  // Los botones del cuadro de etiquetas y anotación de una causa (km).
+  function crearEtiquetaDesdeCaja(caja, km) {
+    const campo = caja.querySelector('.sj-et-nombre');
+    guardarNotaAbierta();
+    const id = crearEtiqueta(campo.value, colorElegido);
+    if (!id) { campo.focus(); return; }
+    if ((marcaDe(km).et || []).indexOf(id) < 0) alternarEtiqueta(km, id);
+    if (VISTA === 'exp') pintarExpediente(); else { pintarFiltros(); pintarTabla(); }
+    pintarCopia();
+  }
+  function guardarAnotacionDesdeCaja(caja, km) {
+    fijarMarca(km, { nota: caja.querySelector('.sj-nota').value });
+    if (VISTA !== 'exp') pintarTabla();
+    pintarCopia();
+    const ok = q('[data-marca] .sj-ok');
+    if (ok) { ok.classList.add('si'); setTimeout(() => ok.classList.remove('si'), 2200); }
+  }
+  function borrarAnotacionDesdeCaja(caja, km, b) {
+    if (!b.classList.contains('peligro')) { b.classList.add('peligro'); b.textContent = 'Confirmar el borrado'; return; }
+    fijarMarca(km, { nota: '' });
+    if (VISTA === 'exp') pintarExpediente(); else pintarTabla();
+    pintarCopia();
+  }
+  function clicEnBoton(t) {
     const b = t.closest('[data-a]');
-    if (!b || b.disabled) return;
+    if (!b || b.disabled) return true;
     const a = b.dataset.a;
     const k = b.dataset.k;
     if (b.closest('.sj-menu')) cerrarMenu();
-
-    if (accionDeBoton(a, b, k, e)) return;
-
-
+    if (accionDeBoton(a, b, k)) return true;
     const caja = b.closest('[data-marca]');
-    if (!caja) return;
+    if (!caja) return true;
     const km = caja.dataset.marca;
-    if (a === 'crearEt') {
-      const campo = caja.querySelector('.sj-et-nombre');
-      guardarNotaAbierta();
-      const id = crearEtiqueta(campo.value, colorElegido);
-      if (!id) { campo.focus(); return; }
-      if ((marcaDe(km).et || []).indexOf(id) < 0) alternarEtiqueta(km, id);
-      if (VISTA === 'exp') pintarExpediente(); else { pintarFiltros(); pintarTabla(); }
-      pintarCopia();
-      return;
-    }
-    if (a === 'guardarAnot') {
-      fijarMarca(km, { nota: caja.querySelector('.sj-nota').value });
-      if (VISTA !== 'exp') pintarTabla();
-      pintarCopia();
-      const ok = q('[data-marca] .sj-ok');
-      if (ok) { ok.classList.add('si'); setTimeout(() => ok.classList.remove('si'), 2200); }
-      return;
-    }
-    if (a === 'borrarAnot') {
-      if (!b.classList.contains('peligro')) { b.classList.add('peligro'); b.textContent = 'Confirmar el borrado'; return; }
-      fijarMarca(km, { nota: '' });
-      if (VISTA === 'exp') pintarExpediente(); else pintarTabla();
-      pintarCopia();
-    }
+    if (a === 'crearEt') crearEtiquetaDesdeCaja(caja, km);
+    else if (a === 'guardarAnot') guardarAnotacionDesdeCaja(caja, km);
+    else if (a === 'borrarAnot') borrarAnotacionDesdeCaja(caja, km, b);
+    return true;
   }
 
-  // Qué hace cada botón, por su marca. Devuelve true si atendió el clic.
-  function accionDeBoton(a, b, k, e) {
-      switch (a) {
-        case 'min': minimizar(); return true;
-        case 'cerrar': cerrarVentana(); return true;
-        case 'max': alternarMaxi(); return true;
-        case 'menuPJN':
-          if (menuAbierto && menuAbierto.dataset.ancla === 'menuPJN') { cerrarMenu(); return true; }
-          abrirMenu(b, menuPJNHTML());
-          return true;
-        case 'menuCols':
-        case 'menuColsAct': {
-          if (menuAbierto && menuAbierto.dataset.ancla === a) { cerrarMenu(); return true; }
-          abrirMenu(b, menuColsHTML(a === 'menuColsAct' ? 'act' : 'lista'));
-          return true;
-        }
-        case 'colsReset': {
-          const tab = b.dataset.tabla || 'lista';
-          const T = TABLAS[tab];
-          CFG[T.cols] = T.def.map((c) => c.k);
-          CFG[T.ocultas] = T.def.filter((c) => c.oculta).map((c) => c.k);
-          CFG[T.anchos] = {};
-          guardarCfg();
-          repintarTabla(tab);
-          return true;
-        }
-        case 'ordenPJNLista': {
-          // Como el PJN: por fecha de la última actuación, de la más nueva a la más
-          // vieja, y con la misma fecha en el orden en que las manda el sitio.
-          const yaEstaba = CFG.orden.col === 'ult' && CFG.orden.desc !== false;
-          CFG.orden = { col: 'ult', desc: true };
-          guardarCfg();
-          PAGINA_VISTA.rel = 1;
-          PAGINA_VISTA.fav = 1;
-          pintarTabla();
-          pintarFiltros();
-          const cuerpo = q('.sj-cuerpo');
-          if (cuerpo) cuerpo.scrollTop = 0;
-          // El PJN no manda la hora: si hay causas que empatan en la fecha y todavía
-          // no se les averiguó, se ofrece hacerlo (descarga el último documento de cada una).
-          const faltan = causasSinHora();
-          avisar((yaEstaba
-            ? 'Ya estaban en orden cronológico: por última actuación, de la más nueva a la más vieja.'
-            : 'Ordenadas por última actuación, de la más nueva a la más vieja.') +
-            (faltan.length ? ' Hay ' + plural(faltan.length, 'causa que empata', 'causas que empatan') + ' en la fecha y sin hora: pulsá "Averiguar la hora" para leerla del último documento firmado.' : ''));
-          return true;
-        }
-        case 'ordenPJNlista2': {
-          // El orden en que las manda el PJN (la lista se lee pidiéndosela por fecha).
-          CFG.orden = { col: '', desc: false };
-          guardarCfg();
-          PAGINA_VISTA.rel = 1;
-          PAGINA_VISTA.fav = 1;
-          pintarTabla();
-          pintarFiltros();
-          const c2 = q('.sj-cuerpo');
-          if (c2) c2.scrollTop = 0;
-          avisar('En el orden en que las manda el PJN.');
-          return true;
-        }
-        case 'novedades':
-          CFG.novedades = !CFG.novedades;
-          guardarCfg();
-          PAGINA_VISTA.rel = 1;
-          PAGINA_VISTA.fav = 1;
-          pintarFiltros();
-          pintarTabla();
-          pintarEstado();
-          avisar(CFG.novedades ? 'Solo las causas que se movieron desde la última vez que las miraste.' : 'Se ven todas las causas de nuevo.');
-          return true;
-        case 'vistoTodo':
-          fotoVisto();
-          if (CFG.novedades) { CFG.novedades = false; guardarCfg(); }
-          pintarFiltros();
-          pintarTabla();
-          pintarEstado();
-          avisar('Listo: todas quedaron como vistas.');
-          return true;
-        case 'vistoUna':
-          marcarVisto(k);
-          pintarTabla();
-          pintarFiltros();
-          return true;
-        case 'horas': averiguarHoras().catch((e) => avisar('No se pudo averiguar la hora: ' + mensajeDe(e) + '.', true)); return true;
-        case 'zoomMas': cambiarZoom(zoomVecino(1)); return true;
-        case 'zoomMenos': cambiarZoom(zoomVecino(-1)); return true;
-        case 'zoomCien': cambiarZoom(1); return true;
-        case 'actualizar': avisar(''); actualizar(); return true;
-        case 'cortarLectura': cancelarLectura = true; cortarHoras = true; estadoTxt('Cancelando...'); return true;
-        case 'limpiar':
-          Object.assign(CFG, { texto: '', fuero: '', sit: '', tramite: 'todas', etiqueta: '', desde: '', hasta: '', novedades: false });
-          PAGINA_VISTA.rel = 1;
-          PAGINA_VISTA.fav = 1;
-          guardarCfg();
-          pintarFiltros();
-          pintarTabla();
-          return true;
-        case 'irMarcas': irAVista('marcas'); return true;
-        case 'quitarSel': selVista().clear(); pintarTodo(); return true;
-        case 'quitarUna': selVista().delete(k); pintarTodo(); return true;
-        case 'notaSel': pedirNota([...selVista()]); return true;
-        case 'usarLista': irALista(b.dataset.lista); pintarTodo(); return true;
-        case 'verSolapa': {
-          const clave = b.dataset.sol;
-          const s = EXP.solapas[clave];
-          if (!s) return true;
-          if (b.dataset.otra) { s.estado = 'nada'; s.abierta = true; } else s.abierta = !s.abierta;
-          if (s.abierta && s.estado === 'nada') leerSolapa(clave);
-          else pintarSolapaExp(clave);
-          return true;
-        }
-        case 'abrirVinc': abrirVinculado(k, false); return true;
-        case 'abrirVincNueva': abrirVinculado(k, true); return true;
-        case 'bajarVinc': bajarVinculado(k); return true;
-        case 'salirPJN': {
-          // Cerrar la sesión no borra nada, así que no se pide confirmar: se sale.
-          // Lo único que se puede perder es el trabajo a medio hacer, y eso sí se
-          // protege, porque una tanda de nota interrumpida deja causas sin nota y
-          // el usuario creyendo que salieron todas.
-          if (bajandoAlgo() || corridaActiva() || leyendo) {
-            avisar('Hay trabajo en curso: cancelalo o esperá a que termine antes de cerrar la sesión.', true);
-            return true;
-          }
-          const u = enlaceSalirPJN();
-          if (!u) { avisar('No se encuentra el enlace para cerrar sesión en esta página del PJN.', true); return true; }
-          avisar('Cerrando la sesión del PJN...');
-          location.href = u;
-          return true;
-        }
-        case 'cedulaUna': dejarCedula(k); return true;
-        case 'verEscr': bandejaDeCausa('escr', k); return true;
-        case 'verNotif': bandejaDeCausa('notif', k); return true;
-        case 'verDeox': bandejaDeCausa('deox', k); return true;
-        case 'verGuia': guiaDeDependencia(depDe(k), k); return true;
-        case 'bandConsultar': consultarBandeja(b.dataset.v); return true;
-        case 'bandSinCausa': BAND[b.dataset.v].causa = null; consultarBandeja(b.dataset.v); return true;
-        case 'bandVer': pdfBandeja(b.dataset.v, b.dataset.id, false); return true;
-        case 'bandBajar': pdfBandeja(b.dataset.v, b.dataset.id, true); return true;
-        case 'guiaDep': guiaDeDependencia(b.dataset.dep); return true;
-        case 'guiaBuscar': guiaBuscar(); return true;
-        case 'guiaPag': guiaBuscar(Math.max(0, parseInt(b.dataset.p, 10) || 0)); return true;
-        case 'guiaInicio': guiaInicio(); return true;
-        case 'guiaAbrir': GUIA.nota = ''; guiaAbrir(b.dataset.cod, true); return true;
-        case 'guiaVolver': guiaVolver(); return true;
-        case 'guiaCopiar': guiaCopiar(); return true;
-        case 'diagnostico': revisarPJN(); return true;
-        case 'cortarDiag': cortarDiag(); return true;
-        case 'copiarDiag': copiarCuadro('diagTexto', 'Informe copiado.'); return true;
-        case 'copiarFallas': copiarCuadro('fallasTexto', 'Registro copiado.'); return true;
-        case 'borrarFallas': {
-          if (!FALLAS.length) { avisar('El registro ya está vacío.'); return true; }
-          const n = FALLAS.length;
-          borrarFallas();
-          pintarFallas();
-          avisar('Registro vaciado: se quitaron ' + plural(n, 'entrada', 'entradas') + '.');
-          return true;
-        }
-        case 'notaTodas': pedirNota(null); return true;
-        case 'bajarSel': bajarCausas([...selVista()]); return true;
-        case 'elegirSel': elegirActuaciones([...selVista()][0]); return true;
-        case 'cortarNota': cortarNota(); return true;
-        case 'abrir': abrirCausa(k, false); return true;
-        case 'abrirNueva': abrirCausa(k, true); return true;
-        case 'libro': libroDigital(k); return true;
-        case 'escrito': presentarEscrito(k); return true;
-        case 'bajarUna': bajarCausas([k]); return true;
-        case 'elegirUna': elegirActuaciones(k); return true;
-        case 'notaUna': pedirNota([k]); return true;
-        case 'marcasUna':
-          abierta = k;
-          pintarTabla();
-          setTimeout(() => { const c = q('.sj-det-in[data-marca]'); if (c) { c.scrollIntoView({ block: 'nearest' }); const n = c.querySelector('.sj-et-nombre'); if (n) n.focus(); } }, 30);
-          return true;
-        case 'seguirAhora': saltarPausa(); return true;
-        case 'cortarCola':
-          cortarCola = true;
-          cortePedidoEn = Date.now();
-          // También las que están esperando que elijas actuaciones: si no, el botón
-          // decía "cancelar" y esas quedaban ahí, bloqueando el aviso al salir.
-          COLA.forEach((x) => { if (x.estado === 'en cola' || x.estado === 'a descargar' || x.estado === 'eligiendo') { x.estado = 'cancelado'; x.texto = 'Cancelado.'; } });
-          pintarDescargas();
-          return true;
-        case 'limpiarCola':
-          for (let i = COLA.length - 1; i >= 0; i--) if (/listo|error|cancelado/.test(COLA[i].estado)) COLA.splice(i, 1);
-          pintarDescargas();
-          return true;
-        case 'volverLista': location.href = RUTA.rel; return true;
-        case 'recargar': location.reload(); return true;
-        case 'recargarApp': {
-          // Recargar corta lo que esté en curso: si hay trabajo, se pide confirmar.
-          if ((bloqueoNota() || bajandoAlgo()) && !b.classList.contains('peligro')) {
-            b.classList.add('peligro');
-            b.textContent = 'Confirmar: se cancela lo que está en curso';
-            avisar('Hay trabajo en curso (dejar nota o descargas). Si recargás, se cancela.', true);
-            return true;
-          }
-          location.reload();
-          return true;
-        }
-        case 'notaPJN': {
-          const x = botonPJN(PJN.botonExp.nota);
-          if (!x) { avisar('No se encuentra el botón "Dejar Nota" del PJN en esta página.', true); return true; }
-          minimizar();
-          x.click();
-          return true;
-        }
-        case 'escritoPJN': {
-          const x = botonPJN(PJN.botonExp.escrito);
-          if (!x) { avisar('No se encuentra "Presentar escrito" en esta página.', true); return true; }
-          x.click();
-          return true;
-        }
-        case 'exportar':
-          if (!hayContra()) {
-            irAVista('marcas');
-            avisar('Antes de exportar poné una contraseña para tus copias, en Respaldo.', true);
-            return true;
-          }
-          exportarMarcas().then(() => {
-            pintarCopia();
-            irAVista('marcas');
-            avisar('Copia exportada, con tu contraseña. Guardala donde guardes tus papeles de trabajo.');
-          }, (e) => avisar('No se pudo exportar: ' + mensajeDe(e) + '.', true));
-          return true;
-        case 'guardarContra': {
-          const campo = q('#supjn .sj-contra');
-          const v = campo ? String(campo.value || '').trim() : '';
-          if (v.length < 6) { avisar('Poné una contraseña de al menos 6 caracteres.', true); return true; }
-          guardarContra(v);
-          mostrarContra = false;
-          irAVista('marcas');
-          avisar('Contraseña guardada. Anotala donde guardes tus claves: sin ella el archivo no se abre en ninguna parte.');
-          // Con la contraseña puesta, la carpeta se lee y se guarda ya.
-          if (CARPETA) {
-            conectarCarpeta(false).then(() => {
-              pintarCopia();
-              if (VISTA === 'marcas') irAVista('marcas');
-              if (carpetaEstado === 'contra' && carpetaBloqueada) avisar('Contraseña guardada, pero no abre el respaldo que hay en la carpeta: ' + carpetaAviso + '.', true);
-            }).catch(() => { /* el estado de la carpeta ya lo informa */ });
-          }
-          return true;
-        }
-        case 'pisarCarpeta':
-          if (!b.classList.contains('peligro')) { b.classList.add('peligro'); b.textContent = 'Confirmar: se reemplaza el respaldo de la carpeta'; return true; }
-          pisarCarpeta().then((ok) => {
-            pintarCopia();
-            irAVista('marcas');
-            avisar(ok ? 'Listo: el respaldo de la carpeta tiene ahora los datos de esta PC, con la contraseña de esta PC.' : 'No se pudo guardar en la carpeta: ' + (carpetaAviso || 'revisá el permiso') + '.', !ok);
-          }).catch((e) => avisar('No se pudo guardar en la carpeta: ' + mensajeDe(e) + '.', true));
-          return true;
-        case 'verContra': mostrarContra = true; irAVista('marcas'); return true;
-        case 'ocultarContra': mostrarContra = false; irAVista('marcas'); return true;
-        case 'elegirCarpeta':
-          elegirCarpeta().then((r) => {
-            irAVista('marcas');
-            avisar('Carpeta conectada: SuPJN+ va a guardar las etiquetas, las anotaciones y las notas en ' + r.nombre + ', y a leer de ahí al abrir.' +
-              (r.git ? ' Atención: esa carpeta parece un repositorio de Git. Si la subís a GitHub, las anotaciones quedarían públicas. Elegí otra.' : ''), !!r.git);
-            return conectarCarpeta(false);
-          }).then(() => { pintarCopia(); if (VISTA === 'marcas') irAVista('marcas'); })
-            .catch((e) => { if (!/abort/i.test(String(e && e.name))) avisar('No se pudo usar esa carpeta: ' + mensajeDe(e) + '.', true); });
-          return true;
-        case 'conectarCarpeta':
-          conectarCarpeta(true).then(() => { irAVista('marcas'); avisar(carpetaEstado === 'lista' ? 'Carpeta conectada: se guarda e importa automáticamente.' : 'No se pudo conectar la carpeta.', carpetaEstado !== 'lista'); })
-            .catch(() => avisar('No se pudo conectar la carpeta.', true));
-          return true;
-        case 'guardarCarpeta':
-          escribirEnCarpeta().then((ok) => { pintarCopia(); if (VISTA === 'marcas') irAVista('marcas'); avisar(ok ? 'Guardado en la carpeta.' : 'No se pudo guardar: ' + (carpetaAviso || 'revisá el permiso de la carpeta') + '.', !ok); })
-            .catch((e) => avisar('No se pudo guardar en la carpeta: ' + mensajeDe(e) + '.', true));
-          return true;
-        case 'importar': q('[data-e="archivo"]').click(); return true;
-        case 'borrarEt':
-          if (!b.classList.contains('peligro')) { b.classList.add('peligro'); b.textContent = 'Confirmar: se quita de todas'; return true; }
-          borrarEtiqueta(b.dataset.id);
-          irAVista('marcas');
-          return true;
-        case 'cerrarDet': guardarNotaAbierta(); abierta = null; pintarTabla(); return true;
-        default: break;
+  const ZONAS_DEL_CLIC = [
+    clicEnMenu, clicEnSolapas, clicEnOrdenDeBandeja, clicEnPaginaDeBandeja, clicEnTituloDeColumna, clicEnPaginaDeLista,
+    clicEnAbrirCausa, clicEnMasDeLaFila, clicEnDetalleDeLaFila, clicEnColorDeEtiqueta, clicEnChipDeEtiqueta, clicEnElegirActuaciones, clicEnBoton
+  ];
+  function alClic(e) {
+    const t = e.target;
+    for (const zona of ZONAS_DEL_CLIC) if (zona(t, e)) return;
+  }
+
+  // Las acciones de los botones de la ventana, una función por acción (1.3.8).
+  // Cada una recibe el botón (b), la clave de la causa de la fila (k) y el
+  // nombre de la acción (a). Se llaman desde accionDeBoton.
+  const ACCIONES_DE_BOTON = {
+    min() { minimizar(); },
+    cerrar() { cerrarVentana(); },
+    max() { alternarMaxi(); },
+    menuPJN(b) {
+      if (menuAbierto && menuAbierto.dataset.ancla === 'menuPJN') { cerrarMenu(); return; }
+      abrirMenu(b, menuPJNHTML());
+    },
+    menuCols(b, k, a) {
+      if (menuAbierto && menuAbierto.dataset.ancla === a) { cerrarMenu(); return; }
+      abrirMenu(b, menuColsHTML(a === 'menuColsAct' ? 'act' : 'lista'));
+    },
+    menuColsAct(b, k, a) { return ACCIONES_DE_BOTON.menuCols(b, k, a); },
+    colsReset(b) {
+      const tab = b.dataset.tabla || 'lista';
+      const T = TABLAS[tab];
+      CFG[T.cols] = T.def.map((c) => c.k);
+      CFG[T.ocultas] = T.def.filter((c) => c.oculta).map((c) => c.k);
+      CFG[T.anchos] = {};
+      guardarCfg();
+      repintarTabla(tab);
+    },
+    ordenPJNLista() {
+      // Como el PJN: por fecha de la última actuación, de la más nueva a la más
+      // vieja, y con la misma fecha en el orden en que las manda el sitio.
+      const yaEstaba = CFG.orden.col === 'ult' && CFG.orden.desc !== false;
+      CFG.orden = { col: 'ult', desc: true };
+      guardarCfg();
+      PAGINA_VISTA.rel = 1;
+      PAGINA_VISTA.fav = 1;
+      pintarTabla();
+      pintarFiltros();
+      const cuerpo = q('.sj-cuerpo');
+      if (cuerpo) cuerpo.scrollTop = 0;
+      // El PJN no manda la hora: si hay causas que empatan en la fecha y todavía
+      // no se les averiguó, se ofrece hacerlo (descarga el último documento de cada una).
+      const faltan = causasSinHora();
+      avisar((yaEstaba
+        ? 'Ya estaban en orden cronológico: por última actuación, de la más nueva a la más vieja.'
+        : 'Ordenadas por última actuación, de la más nueva a la más vieja.') +
+          (faltan.length ? ' Hay ' + plural(faltan.length, 'causa que empata', 'causas que empatan') + ' en la fecha y sin hora: pulsá "Averiguar la hora" para leerla del último documento firmado.' : ''));
+    },
+    ordenPJNlista2() {
+      // El orden en que las manda el PJN (la lista se lee pidiéndosela por fecha).
+      CFG.orden = { col: '', desc: false };
+      guardarCfg();
+      PAGINA_VISTA.rel = 1;
+      PAGINA_VISTA.fav = 1;
+      pintarTabla();
+      pintarFiltros();
+      const c2 = q('.sj-cuerpo');
+      if (c2) c2.scrollTop = 0;
+      avisar('En el orden en que las manda el PJN.');
+    },
+    novedades() {
+      CFG.novedades = !CFG.novedades;
+      guardarCfg();
+      PAGINA_VISTA.rel = 1;
+      PAGINA_VISTA.fav = 1;
+      pintarFiltros();
+      pintarTabla();
+      pintarEstado();
+      avisar(CFG.novedades ? 'Solo las causas que se movieron desde la última vez que las miraste.' : 'Se ven todas las causas de nuevo.');
+    },
+    vistoTodo() {
+      fotoVisto();
+      if (CFG.novedades) { CFG.novedades = false; guardarCfg(); }
+      pintarFiltros();
+      pintarTabla();
+      pintarEstado();
+      avisar('Listo: todas quedaron como vistas.');
+    },
+    vistoUna(b, k) {
+      marcarVisto(k);
+      pintarTabla();
+      pintarFiltros();
+    },
+    horas() { averiguarHoras().catch((e) => avisar('No se pudo averiguar la hora: ' + mensajeDe(e) + '.', true)); },
+    zoomMas() { cambiarZoom(zoomVecino(1)); },
+    zoomMenos() { cambiarZoom(zoomVecino(-1)); },
+    zoomCien() { cambiarZoom(1); },
+    actualizar() { avisar(''); actualizar(); },
+    cortarLectura() { cancelarLectura = true; cortarHoras = true; estadoTxt('Cancelando...'); },
+    limpiar() {
+      Object.assign(CFG, { texto: '', fuero: '', sit: '', tramite: 'todas', etiqueta: '', desde: '', hasta: '', novedades: false });
+      PAGINA_VISTA.rel = 1;
+      PAGINA_VISTA.fav = 1;
+      guardarCfg();
+      pintarFiltros();
+      pintarTabla();
+    },
+    irMarcas() { irAVista('marcas'); },
+    quitarSel() { selVista().clear(); pintarTodo(); },
+    quitarUna(b, k) { selVista().delete(k); pintarTodo(); },
+    notaSel() { pedirNota([...selVista()]); },
+    usarLista(b) { irALista(b.dataset.lista); pintarTodo(); },
+    verSolapa(b) {
+      const idSolapa = b.dataset.sol;
+      const s = EXP.solapas[idSolapa];
+      if (!s) return;
+      if (b.dataset.otra) { s.estado = 'nada'; s.abierta = true; } else s.abierta = !s.abierta;
+      if (s.abierta && s.estado === 'nada') leerSolapa(idSolapa);
+      else pintarSolapaExp(idSolapa);
+    },
+    abrirVinc(b, k) { abrirVinculado(k, false); },
+    abrirVincNueva(b, k) { abrirVinculado(k, true); },
+    bajarVinc(b, k) { bajarVinculado(k); },
+    salirPJN() {
+      // Cerrar la sesión no borra nada, así que no se pide confirmar: se sale.
+      // Lo único que se puede perder es el trabajo a medio hacer, y eso sí se
+      // protege, porque una tanda de nota interrumpida deja causas sin nota y
+      // el usuario creyendo que salieron todas.
+      if (bajandoAlgo() || corridaActiva() || leyendo) {
+        avisar('Hay trabajo en curso: cancelalo o esperá a que termine antes de cerrar la sesión.', true);
+        return;
       }
-    return false;
+      const u = enlaceSalirPJN();
+      if (!u) { avisar('No se encuentra el enlace para cerrar sesión en esta página del PJN.', true); return; }
+      avisar('Cerrando la sesión del PJN...');
+      location.href = u;
+    },
+    cedulaUna(b, k) { dejarCedula(k); },
+    verEscr(b, k) { bandejaDeCausa('escr', k); },
+    verNotif(b, k) { bandejaDeCausa('notif', k); },
+    verDeox(b, k) { bandejaDeCausa('deox', k); },
+    verGuia(b, k) { guiaDeDependencia(depDe(k), k); },
+    bandConsultar(b) { consultarBandeja(b.dataset.v); },
+    bandSinCausa(b) { BAND[b.dataset.v].causa = null; consultarBandeja(b.dataset.v); },
+    bandVer(b) { pdfBandeja(b.dataset.v, b.dataset.id, false); },
+    bandBajar(b) { pdfBandeja(b.dataset.v, b.dataset.id, true); },
+    guiaDep(b) { guiaDeDependencia(b.dataset.dep); },
+    guiaBuscar() { guiaBuscar(); },
+    guiaPag(b) { guiaBuscar(Math.max(0, parseInt(b.dataset.p, 10) || 0)); },
+    guiaInicio() { guiaInicio(); },
+    guiaAbrir(b) { GUIA.nota = ''; guiaAbrir(b.dataset.cod, true); },
+    guiaVolver() { guiaVolver(); },
+    guiaCopiar() { guiaCopiar(); },
+    diagnostico() { revisarPJN(); },
+    cortarDiag() { cortarDiag(); },
+    copiarDiag() { copiarCuadro('diagTexto', 'Informe copiado.'); },
+    copiarFallas() { copiarCuadro('fallasTexto', 'Registro copiado.'); },
+    borrarFallas() {
+      if (!FALLAS.length) { avisar('El registro ya está vacío.'); return; }
+      const n = FALLAS.length;
+      borrarFallas();
+      pintarFallas();
+      avisar('Registro vaciado: se quitaron ' + plural(n, 'entrada', 'entradas') + '.');
+    },
+    notaTodas() { pedirNota(null); },
+    // Verificar es el mismo lote de siempre, con las dudosas como selección:
+    // el PJN admite una sola nota por expediente y por día, así que o avisa
+    // que ya estaba, o la deja porque faltaba. No hay mecanismo nuevo.
+    verificarDudosas() {
+      const d = dudosasDeHoy();
+      if (!d.length) { avisar('No hay ninguna causa a verificar de hoy.', true); return; }
+      pedirNota(d);
+    },
+    bajarSel() { bajarCausas([...selVista()]); },
+    elegirSel() { elegirActuaciones([...selVista()][0]); },
+    cortarNota() { cortarNota(); },
+    abrir(b, k) { abrirCausa(k, false); },
+    abrirNueva(b, k) { abrirCausa(k, true); },
+    libro(b, k) { libroDigital(k); },
+    escrito(b, k) { presentarEscrito(k); },
+    bajarUna(b, k) { bajarCausas([k]); },
+    elegirUna(b, k) { elegirActuaciones(k); },
+    notaUna(b, k) { pedirNota([k]); },
+    marcasUna(b, k) {
+      abierta = k;
+      pintarTabla();
+      setTimeout(() => { const c = q('.sj-det-in[data-marca]'); if (c) { c.scrollIntoView({ block: 'nearest' }); const n = c.querySelector('.sj-et-nombre'); if (n) n.focus(); } }, 30);
+    },
+    seguirAhora() { saltarPausa(); },
+    cortarCola() {
+      cortarCola = true;
+      cortePedidoEn = Date.now();
+      // También las que están esperando que elijas actuaciones: si no, el botón
+      // decía "cancelar" y esas quedaban ahí, bloqueando el aviso al salir.
+      COLA.forEach((x) => { if (x.estado === 'en cola' || x.estado === 'a descargar' || x.estado === 'eligiendo') { x.estado = 'cancelado'; x.texto = 'Cancelado.'; } });
+      pintarDescargas();
+    },
+    limpiarCola() {
+      for (let i = COLA.length - 1; i >= 0; i--) if (/listo|error|cancelado/.test(COLA[i].estado)) COLA.splice(i, 1);
+      pintarDescargas();
+    },
+    volverLista() { location.href = RUTA.rel; },
+    recargar() { location.reload(); },
+    recargarApp(b) {
+      // Recargar corta lo que esté en curso: si hay trabajo, se pide confirmar.
+      if ((bloqueoNota() || bajandoAlgo()) && !b.classList.contains('peligro')) {
+        b.classList.add('peligro');
+        b.textContent = 'Confirmar: se cancela lo que está en curso';
+        avisar('Hay trabajo en curso (dejar nota o descargas). Si recargás, se cancela.', true);
+        return;
+      }
+      location.reload();
+    },
+    notaPJN() {
+      const x = botonPJN(PJN.botonExp.nota);
+      if (!x) { avisar('No se encuentra el botón "Dejar Nota" del PJN en esta página.', true); return; }
+      minimizar();
+      x.click();
+    },
+    escritoPJN() {
+      const x = botonPJN(PJN.botonExp.escrito);
+      if (!x) { avisar('No se encuentra "Presentar escrito" en esta página.', true); return; }
+      x.click();
+    },
+    exportar() {
+      if (!hayContra()) {
+        irAVista('marcas');
+        avisar('Antes de exportar poné una contraseña para tus copias, en Respaldo.', true);
+        return;
+      }
+      exportarMarcas().then(() => {
+        pintarCopia();
+        irAVista('marcas');
+        avisar('Copia exportada, con tu contraseña. Guardala donde guardes tus papeles de trabajo.');
+      }, (e) => avisar('No se pudo exportar: ' + mensajeDe(e) + '.', true));
+    },
+    guardarContra() {
+      const campo = q('#supjn .sj-contra');
+      const v = campo ? String(campo.value || '').trim() : '';
+      if (v.length < 6) { avisar('Poné una contraseña de al menos 6 caracteres.', true); return; }
+      guardarContra(v);
+      mostrarContra = false;
+      irAVista('marcas');
+      avisar('Contraseña guardada. Anotala donde guardes tus claves: sin ella el archivo no se abre en ninguna parte.');
+      // Con la contraseña puesta, la carpeta se lee y se guarda ya.
+      if (CARPETA) {
+        conectarCarpeta(false).then(() => {
+          pintarCopia();
+          if (VISTA === 'marcas') irAVista('marcas');
+          if (carpetaEstado === 'contra' && carpetaBloqueada) avisar('Contraseña guardada, pero no abre el respaldo que hay en la carpeta: ' + carpetaAviso + '.', true);
+        }).catch(() => { /* el estado de la carpeta ya lo informa */ });
+      }
+    },
+    pisarCarpeta(b) {
+      if (!b.classList.contains('peligro')) { b.classList.add('peligro'); b.textContent = 'Confirmar: se reemplaza el respaldo de la carpeta'; return; }
+      pisarCarpeta().then((ok) => {
+        pintarCopia();
+        irAVista('marcas');
+        avisar(ok ? 'Listo: el respaldo de la carpeta tiene ahora los datos de esta PC, con la contraseña de esta PC.' : 'No se pudo guardar en la carpeta: ' + (carpetaAviso || 'revisá el permiso') + '.', !ok);
+      }).catch((e) => avisar('No se pudo guardar en la carpeta: ' + mensajeDe(e) + '.', true));
+    },
+    verContra() { mostrarContra = true; irAVista('marcas'); },
+    ocultarContra() { mostrarContra = false; irAVista('marcas'); },
+    elegirCarpeta() {
+      elegirCarpeta().then((r) => {
+        irAVista('marcas');
+        avisar('Carpeta conectada: SuPJN+ va a guardar las etiquetas, las anotaciones y las notas en ' + r.nombre + ', y a leer de ahí al abrir.' +
+            (r.git ? ' Atención: esa carpeta parece un repositorio de Git. Si la subís a GitHub, las anotaciones quedarían públicas. Elegí otra.' : ''), !!r.git);
+        return conectarCarpeta(false);
+      }).then(() => { pintarCopia(); if (VISTA === 'marcas') irAVista('marcas'); })
+        .catch((e) => { if (!/abort/i.test(String(e && e.name))) avisar('No se pudo usar esa carpeta: ' + mensajeDe(e) + '.', true); });
+    },
+    conectarCarpeta() {
+      conectarCarpeta(true).then(() => { irAVista('marcas'); avisar(carpetaEstado === 'lista' ? 'Carpeta conectada: se guarda e importa automáticamente.' : 'No se pudo conectar la carpeta.', carpetaEstado !== 'lista'); })
+        .catch(() => avisar('No se pudo conectar la carpeta.', true));
+    },
+    guardarCarpeta() {
+      escribirEnCarpeta().then((ok) => { pintarCopia(); if (VISTA === 'marcas') irAVista('marcas'); avisar(ok ? 'Guardado en la carpeta.' : 'No se pudo guardar: ' + (carpetaAviso || 'revisá el permiso de la carpeta') + '.', !ok); })
+        .catch((e) => avisar('No se pudo guardar en la carpeta: ' + mensajeDe(e) + '.', true));
+    },
+    importar() { q('[data-e="archivo"]').click(); },
+    borrarEt(b) {
+      if (!b.classList.contains('peligro')) { b.classList.add('peligro'); b.textContent = 'Confirmar: se quita de todas'; return; }
+      borrarEtiqueta(b.dataset.id);
+      irAVista('marcas');
+    },
+    cerrarDet() { guardarNotaAbierta(); abierta = null; pintarTabla(); },
+  };
+
+  // Despacha el botón a su acción. Devuelve false si no hay acción con ese nombre.
+  function accionDeBoton(a, b, k) {
+    if (!Object.prototype.hasOwnProperty.call(ACCIONES_DE_BOTON, a)) return false;
+    ACCIONES_DE_BOTON[a](b, k, a);
+    return true;
   }
 
   // ----------------------------------------------- 9.2 la hora del documento
@@ -8558,21 +8897,21 @@
 
   // ---------------------- 10.1 las otras solapas del expediente: en pantalla
 
-  async function leerSolapa(clave, auto) {
-    const s = EXP.solapas[clave];
+  async function leerSolapa(solapa, auto) {
+    const s = EXP.solapas[solapa];
     if (!s || s.estado === 'leyendo') return;
     if (!auto) s.abierta = true;
     if (!CID_PAGINA) {
       s.estado = 'error';
       s.texto = 'No se encuentra el número de consulta (cid) en la dirección de la página: recargala desde la lista.';
-      pintarSolapaExp(clave);
+      pintarSolapaExp(solapa);
       return;
     }
     s.estado = 'leyendo';
     s.texto = 'Consultando al PJN...';
-    pintarSolapaExp(clave);
+    pintarSolapaExp(solapa);
     try {
-      const r = await leerSolapaExp(CID_PAGINA, clave, (t) => { s.texto = t; pintarSolapaExp(clave); });
+      const r = await leerSolapaExp(CID_PAGINA, solapa, (t) => { s.texto = t; pintarSolapaExp(solapa); });
       s.cabs = r.cabs;
       s.filas = r.filas;
       s.completa = r.completa !== false;
@@ -8581,9 +8920,9 @@
       s.texto = '';
     } catch (e) {
       s.estado = 'error';
-      s.texto = 'No se pudo leer ' + TITULO_SOLAPA[clave] + ': ' + mensajeDe(e) + '.';
+      s.texto = 'No se pudo leer ' + TITULO_SOLAPA[solapa] + ': ' + mensajeDe(e) + '.';
     }
-    pintarSolapaExp(clave);
+    pintarSolapaExp(solapa);
   }
 
   async function abrirVinculado(k, nueva) {
@@ -8642,223 +8981,273 @@
     pintarDiag();
   }
 
-  async function revisarPJN() {
-    if (DIAG.estado === 'corriendo') { pintarDiag(); return; }
-    if (bloqueoNota()) { avisar('Hay un lote de notas en curso: revisá el PJN cuando termine.', true); return; }
-    const mia = ++diagN;
-    const vivo = () => diagN === mia;
-    DIAG.estado = 'corriendo';
-    DIAG.items = [];
-    DIAG.fecha = Date.now();
+  // La revisión del PJN (1.3.8: partida en un paso por elemento). Cada paso
+  // recibe la revisión en curso (R) y devuelve false cuando hay que detenerse
+  // (la sesión venció, no hay causas). R lleva lo que comparten los pasos:
+  // anotar, fallo, vivo, el marco oculto y lo leído de la lista.
+  function crearRevision(mia) {
+    const R = { mia, fr: null, primeras: new Set(), d: null, filas: [] };
+    R.vivo = () => diagN === mia;
     // aviso: algo que impide revisar (la sesión venció, no hay internet) y que
     // no es un cambio del PJN.
-    const anotar = (nombre, ok, detalle, aviso) => {
-      if (!vivo()) return;
+    R.anotar = (nombre, ok, detalle, aviso) => {
+      if (!R.vivo()) return;
       DIAG.items.push({ nombre, ok, detalle: sinNumeroDeCausa(detalle), aviso: aviso || '' });
       pintarDiag();
     };
-    const esVencida = (e) => String(e && e.message ? e.message : e) === VENCIDA;
+    R.esVencida = (e) => String(e && e.message ? e.message : e) === VENCIDA;
     // Un error puede ser un cambio del PJN, pero también la sesión vencida o
     // datos viejos: eso no se anuncia como cambio.
-    const fallo = async (nombre, e) => {
+    R.fallo = async (nombre, e) => {
       sesionMirada.ts = 0;
-      if (esVencida(e) || (await sesionVencida())) { anotar(nombre, false, 'la sesión del PJN venció en medio de la revisión', 'venció'); return; }
+      if (R.esVencida(e) || (await sesionVencida())) { R.anotar(nombre, false, 'la sesión del PJN venció en medio de la revisión', 'venció'); return; }
       const m = String(e && e.message ? e.message : e);
-      if (/no encuentro .* en (las listas|Relacionados)/i.test(m)) anotar(nombre, null, 'la causa de prueba ya no está en la lista: actualizá las listas y revisá de nuevo');
-      else anotar(nombre, false, mensajeDe(e));
+      if (/no encuentro .* en (las listas|Relacionados)/i.test(m)) R.anotar(nombre, null, 'la causa de prueba ya no está en la lista: actualizá las listas y revisá de nuevo');
+      else R.anotar(nombre, false, mensajeDe(e));
     };
+    R.soltar = () => { if (R.fr) { R.fr.remove(); R.fr = null; } };
     // Los marcos de la revisión aceptan cualquier página del PJN: si cambió la
     // tabla, se quiere saber eso y no solo que la página "no era la esperada".
-    const cualquiera = () => true;
-    const diceSinCausas = (d) => /no se encontraron|no posee|sin resultados/i.test(limpio(textoPJN(d)).slice(0, 6000));
-    const esFecha = (t) => /^\d{2}\/\d{2}\/\d{4}$/.test(t || '');
-    pintarDiag();
-    let fr = null;
-    const soltar = () => { if (fr) { fr.remove(); fr = null; } };
-    let primeras = new Set();
+    R.abrirMarco = async (nombre, url) => {
+      R.fr = crearMarco();
+      try {
+        await esperarCarga(R.fr, () => { R.fr.src = url; }, () => true);
+        return true;
+      } catch (e) {
+        await R.fallo(nombre, e);
+        return false;
+      }
+    };
+    return R;
+  }
+  const diceSinCausas = (d) => /no se encontraron|no posee|sin resultados/i.test(limpio(textoPJN(d)).slice(0, 6000));
+  const esFechaPJN = (t) => /^\d{2}\/\d{2}\/\d{4}$/.test(t || '');
+
+  async function pasoConexionYSesion(R) {
+    if (window.navigator.onLine === false) { R.anotar('Conexión', false, 'el navegador está sin conexión a internet', 'sin conexión'); return false; }
+    sesionMirada.ts = 0;
+    if (await sesionVencida()) { R.anotar('Sesión del PJN', false, 'venció: recargá la página, volvé a entrar si lo pide y probá de nuevo', 'venció'); return false; }
+    R.anotar('Sesión del PJN', true, 'activa');
+    // Con qué cuenta entró: es lo que separa los datos de una cuenta de los de
+    // otra, así que si esto no se lee, SuPJN+ no muestra ni guarda nada.
+    if (CUENTA) R.anotar('Cuenta del PJN', true, 'se leyó del encabezado: ' + cuentaCorta());
+    else R.anotar('Cuenta del PJN', false, 'no se encuentra en el encabezado: sin ese dato no se muestra ni se guarda nada, para no mezclar dos cuentas');
+    // El enlace para salir: se lo busca por su texto, así que un cambio de
+    // rótulo del PJN deja el botón sin destino y conviene enterarse acá.
+    const salir = enlaceSalirPJN();
+    R.anotar('Cerrar sesión', !!salir, salir ? 'está el enlace del PJN para salir' : 'no se encuentra el enlace para salir: el botón de cerrar sesión no va a funcionar');
+    return R.vivo();
+  }
+
+  // La lista de Relacionados y lo que SuPJN+ usa de ella.
+  async function pasoListaDeRelacionados(R) {
+    if (!await R.abrirMarco('Lista de Relacionados', RUTA.rel)) return false;
+    if (!R.vivo()) return false;
+    R.d = R.fr.contentDocument;
+    const esRel = tipoLista(R.d) === 'rel';
+    R.anotar('Lista de Relacionados', esRel, esRel ? 'se abre y tiene su título' : 'se abre, pero no aparece el título "Lista de Expedientes Relacionados"');
+    R.filas = filasDe(R.d);
+    R.primeras = new Set(R.filas.map((f) => f.exp));
+    return true;
+  }
+  function pasoTablaDeCausas(R) {
+    const d = R.d, filas = R.filas;
+    const tabla = tablaDe(d);
+    const crudas = tabla ? filasTabla(tabla).filter((t) => t.cells && t.cells.length > 1).length : 0;
+    if (tabla && filas.length) R.anotar('Tabla de causas', crudas === filas.length, crudas === filas.length
+      ? plural(filas.length, 'causa', 'causas') + ' en la primera página, y se leen'
+      : 'de ' + plural(crudas, 'fila', 'filas') + ' se leen ' + filas.length + ': puede haber cambiado alguna columna');
+    else if (tabla && crudas) R.anotar('Tabla de causas', false, 'tiene filas, pero en ninguna se lee un número de expediente en la primera columna');
+    else if (tabla) R.anotar('Tabla de causas', true, 'está, sin causas');
+    else if (diceSinCausas(d)) R.anotar('Tabla de causas', null, 'el PJN dice que no hay causas: no se puede mirar la tabla');
+    else R.anotar('Tabla de causas', false, 'no se encuentra la tabla con "Expediente" y "Carátula" en el encabezado');
+    return true;
+  }
+  function pasoColumnasDeLaLista(R) {
+    const filas = R.filas;
+    if (!filas.length) return true;
+    const mal = [];
+    if (filas.some((f) => /:/.test(f.exp))) mal.push('el número de expediente trae un rótulo pegado');
+    if (!filas.some((f) => f.car)) mal.push('la carátula viene vacía en todas');
+    // Que una causa nueva no tenga última actuación es normal; que ninguna
+    // de las que tienen algo se lea como fecha, no.
+    if (filas.some((f) => f.ult) && !filas.some((f) => esFechaPJN(f.ult))) mal.push('la última actuación no se lee como fecha');
+    R.anotar('Columnas de la lista', !mal.length, mal.length ? mal.join('; ') : 'expediente, dependencia, carátula, situación y última actuación se leen');
+    return true;
+  }
+  function pasoPaginadorYControles(R) {
+    const d = R.d;
+    const pag = paginadorDe(d);
+    R.anotar('Paginador', pag ? true : null, pag ? 'está' : 'no hay: la lista entra en una sola página');
+    const casilla = casillaVerTodos(d), consultar = botonConsultar(d);
+    R.anotar('"Ver todos los expedientes" y Consultar', !!(casilla && consultar), casilla && consultar ? 'están (sirven para leer las causas fuera de trámite)' : (casilla ? 'falta el botón Consultar' : 'falta la casilla "Ver todos los expedientes"'));
+    return true;
+  }
+  function pasoEnlacesDeLaFila(R) {
+    const d = R.d;
+    const tr = R.filas[0] && R.filas[0].tr;
+    if (!tr) { R.anotar('Enlace para abrir la causa', null, 'no hay causas en la lista para mirarlo'); return true; }
+    const ojo = enlaceOjo(tr);
+    const pr = ojo && paramsDeEnlace(ojo);
+    const form = pr && d.getElementById(pr.formId);
+    R.anotar('Enlace para abrir la causa', !!form, form ? 'está y se entiende' : (ojo ? (pr ? 'está, pero no se encuentra su formulario' : 'está, pero cambió la forma del enlace') : 'no se encuentra el enlace de apertura en la fila'));
+    const libro = enlaceMenu(tr, PJN.menuFila.libro), escrito = enlaceMenu(tr, PJN.menuFila.escrito);
+    R.anotar('Libro digital y Presentar escrito', !!(libro && escrito), libro && escrito ? 'están en el menú de la fila' : 'falta ' + [libro ? '' : '"Libro digital"', escrito ? '' : '"Presentar escrito"'].filter(Boolean).join(' y '));
+    return true;
+  }
+  function pasoCuentaYDejarNota(R) {
+    const d = R.d;
+    // La cuenta: sin ella no se lee ni se guarda nada de lo propio.
+    R.anotar('La cuenta en la página', !!CUENTA,
+      CUENTA ? 'el encabezado del PJN muestra la cuenta y se lee' : 'no se encuentra la cuenta en el encabezado: revisá que la sesión esté abierta');
+    // Las mismas búsquedas que usa el motor de dejar nota, sobre el marco.
+    const filtro = botonFiltroNota(d), cartel = cartelNota(d), confirmar = botonConfirmar(d);
+    const faltan = [filtro ? '' : 'el botón "Dejar nota"', cartel ? '' : 'el cartel de confirmación', confirmar ? '' : 'el botón Confirmar'].filter(Boolean);
+    R.anotar('Dejar nota', !faltan.length, faltan.length ? 'falta ' + faltan.join(', ') : 'están el filtro, el cartel y Confirmar (el lápiz aparece con el filtro puesto, y eso no se prueba para no dejar ninguna nota)');
+    R.soltar();
+    return true;
+  }
+  async function pasoFavoritos(R) {
+    R.fr = crearMarco();
     try {
-      if (window.navigator.onLine === false) { anotar('Conexión', false, 'el navegador está sin conexión a internet', 'sin conexión'); return; }
-      sesionMirada.ts = 0;
-      if (await sesionVencida()) { anotar('Sesión del PJN', false, 'venció: recargá la página, volvé a entrar si lo pide y probá de nuevo', 'venció'); return; }
-      anotar('Sesión del PJN', true, 'activa');
-      // Con qué cuenta entró: es lo que separa los datos de una cuenta de los de
-      // otra, así que si esto no se lee, SuPJN+ no muestra ni guarda nada.
-      if (CUENTA) anotar('Cuenta del PJN', true, 'se leyó del encabezado: ' + cuentaCorta());
-      else anotar('Cuenta del PJN', false, 'no se encuentra en el encabezado: sin ese dato no se muestra ni se guarda nada, para no mezclar dos cuentas');
-      // El enlace para salir: se lo busca por su texto, así que un cambio de
-      // rótulo del PJN deja el botón sin destino y conviene enterarse acá.
-      const salir = enlaceSalirPJN();
-      anotar('Cerrar sesión', !!salir, salir ? 'está el enlace del PJN para salir' : 'no se encuentra el enlace para salir: el botón de cerrar sesión no va a funcionar');
-      if (!vivo()) return;
-
-      // La lista de Relacionados y lo que SuPJN+ usa de ella.
-      fr = crearMarco();
-      try {
-        await esperarCarga(fr, () => { fr.src = RUTA.rel; }, cualquiera);
-      } catch (e) {
-        await fallo('Lista de Relacionados', e);
-        return;
-      }
-      if (!vivo()) return;
-      const d = fr.contentDocument;
-      const esRel = tipoLista(d) === 'rel';
-      anotar('Lista de Relacionados', esRel, esRel ? 'se abre y tiene su título' : 'se abre, pero no aparece el título "Lista de Expedientes Relacionados"');
-      const tabla = tablaDe(d);
-      const filas = filasDe(d);
-      primeras = new Set(filas.map((f) => f.exp));
-      const crudas = tabla ? filasTabla(tabla).filter((t) => t.cells && t.cells.length > 1).length : 0;
-      if (tabla && filas.length) anotar('Tabla de causas', crudas === filas.length, crudas === filas.length
-        ? plural(filas.length, 'causa', 'causas') + ' en la primera página, y se leen'
-        : 'de ' + plural(crudas, 'fila', 'filas') + ' se leen ' + filas.length + ': puede haber cambiado alguna columna');
-      else if (tabla && crudas) anotar('Tabla de causas', false, 'tiene filas, pero en ninguna se lee un número de expediente en la primera columna');
-      else if (tabla) anotar('Tabla de causas', true, 'está, sin causas');
-      else if (diceSinCausas(d)) anotar('Tabla de causas', null, 'el PJN dice que no hay causas: no se puede mirar la tabla');
-      else anotar('Tabla de causas', false, 'no se encuentra la tabla con "Expediente" y "Carátula" en el encabezado');
-      if (filas.length) {
-        const mal = [];
-        if (filas.some((f) => /:/.test(f.exp))) mal.push('el número de expediente trae un rótulo pegado');
-        if (!filas.some((f) => f.car)) mal.push('la carátula viene vacía en todas');
-        // Que una causa nueva no tenga última actuación es normal; que ninguna
-        // de las que tienen algo se lea como fecha, no.
-        if (filas.some((f) => f.ult) && !filas.some((f) => esFecha(f.ult))) mal.push('la última actuación no se lee como fecha');
-        anotar('Columnas de la lista', !mal.length, mal.length ? mal.join('; ') : 'expediente, dependencia, carátula, situación y última actuación se leen');
-      }
-      const pag = paginadorDe(d);
-      anotar('Paginador', pag ? true : null, pag ? 'está' : 'no hay: la lista entra en una sola página');
-      const casilla = casillaVerTodos(d), consultar = botonConsultar(d);
-      anotar('"Ver todos los expedientes" y Consultar', !!(casilla && consultar), casilla && consultar ? 'están (sirven para leer las causas fuera de trámite)' : (casilla ? 'falta el botón Consultar' : 'falta la casilla "Ver todos los expedientes"'));
-      const tr = filas[0] && filas[0].tr;
-      if (tr) {
-        const ojo = enlaceOjo(tr);
-        const pr = ojo && paramsDeEnlace(ojo);
-        const form = pr && d.getElementById(pr.formId);
-        anotar('Enlace para abrir la causa', !!form, form ? 'está y se entiende' : (ojo ? (pr ? 'está, pero no se encuentra su formulario' : 'está, pero cambió la forma del enlace') : 'no se encuentra el enlace de apertura en la fila'));
-        const libro = enlaceMenu(tr, PJN.menuFila.libro), escrito = enlaceMenu(tr, PJN.menuFila.escrito);
-        anotar('Libro digital y Presentar escrito', !!(libro && escrito), libro && escrito ? 'están en el menú de la fila' : 'falta ' + [libro ? '' : '"Libro digital"', escrito ? '' : '"Presentar escrito"'].filter(Boolean).join(' y '));
-      } else {
-        anotar('Enlace para abrir la causa', null, 'no hay causas en la lista para mirarlo');
-      }
-      // La cuenta: sin ella no se lee ni se guarda nada de lo propio.
-      anotar('La cuenta en la página', !!CUENTA,
-        CUENTA ? 'el encabezado del PJN muestra la cuenta y se lee' : 'no se encuentra la cuenta en el encabezado: revisá que la sesión esté abierta');
-
-      // Las mismas búsquedas que usa el motor de dejar nota, sobre el marco.
-      const filtro = botonFiltroNota(d), cartel = cartelNota(d), confirmar = botonConfirmar(d);
-      const faltan = [filtro ? '' : 'el botón "Dejar nota"', cartel ? '' : 'el cartel de confirmación', confirmar ? '' : 'el botón Confirmar'].filter(Boolean);
-      anotar('Dejar nota', !faltan.length, faltan.length ? 'falta ' + faltan.join(', ') : 'están el filtro, el cartel y Confirmar (el lápiz aparece con el filtro puesto, y eso no se prueba para no dejar ninguna nota)');
-      soltar();
-
-      // Favoritos.
-      fr = crearMarco();
-      try {
-        await esperarCarga(fr, () => { fr.src = RUTA.fav; }, cualquiera);
-        const df = fr.contentDocument;
-        const esFav = tipoLista(df) === 'fav', seLee = !!tablaDe(df) || diceSinCausas(df);
-        anotar('Lista de Favoritos', esFav && seLee, esFav && seLee ? 'se abre y se lee' : (!esFav ? 'se abre, pero no aparece el título "Lista de Expedientes Favoritos"' : 'se abre, pero no se encuentra su tabla'));
-      } catch (e) {
-        await fallo('Lista de Favoritos', e);
-        if (esVencida(e)) return;
-      }
-      soltar();
-      if (!vivo()) return;
-
-      // Escritos, Notificaciones, DEOX y la Guía: se abren en segundo plano y se
-      // les pide una lista corta, de la última semana. Solo lectura.
-      for (const v of ['escr', 'notif', 'deox']) {
-        if (!vivo()) return;
-        const E = EXT[v], D = BANDEJAS[v];
-        try {
-          const ruta = D.ruta + '?bandeja=' + D.opciones[0][0] + '&fechaDesde=' + fechaAPI(isoHace(7)) + '&fechaHasta=' + fechaAPI(hoyISO());
-          const r = await pedirPuente(E.app, { op: 'lista', ruta, tope: 1, porPagina: 5 });
-          const items = r && Array.isArray(r.items) ? r.items : [];
-          const f = items.length ? D.fila(items[0], D.opciones[0][0]) : null;
-          if (!f) anotar(E.nombre, true, 'responde con la misma cuenta (no hay elementos de la última semana para mirar los datos)');
-          else anotar(E.nombre, !!(f.exp && f.fecha), f.exp && f.fecha ? 'responde con la misma cuenta, y se leen el expediente y la fecha' : 'responde, pero no se leen ' + (f.exp ? 'la fecha' : 'el expediente') + ': puede haber cambiado la forma de los datos');
-        } catch (e) {
-          anotar(E.nombre, false, String(e && e.message ? e.message : e));
-        }
-      }
-      if (!vivo()) return;
-      try {
-        const g = await pedirPuente('guia', { op: 'json', ruta: rutaGuia('guia-inicio') });
-        const ok = !!(g && g.dependencia && Array.isArray(g.subDependencias) && g.subDependencias.length);
-        anotar('Guía judicial', ok, ok ? 'responde y trae su índice' : 'responde, pero cambió la forma de los datos');
-      } catch (e) {
-        anotar('Guía judicial', false, String(e && e.message ? e.message : e));
-      }
-      if (!vivo()) return;
-
-      // Un expediente: abrirlo, sus datos, sus actuaciones y un PDF. Se prueba
-      // con una causa en trámite ya leída, mejor de la primera página.
-      const leidas = (DATOS.rel && DATOS.rel.causas) || [];
-      const causa = leidas.find((c) => c.tramite && primeras.has(c.exp)) || leidas.find((c) => c.tramite);
-      if (!causa) {
-        anotar('Abrir una causa', null, 'no hay causas en trámite leídas en Mis causas para probar');
-        return;
-      }
-      let url = null;
-      try {
-        // Sin reusar el marco de trabajo que haya quedado de antes: la revisión
-        // tiene que abrir la lista de nuevo y no mirar una copia vieja. Va en su
-        // propio turno porque conMarco no se puede anidar.
-        await conMarco(async () => { soltarMarcoTrabajo(); });
-        url = await direccionDe(causa.exp, 'ojo', () => { /* sin avisos */ });
-        anotar('Abrir una causa', true, 'se abre en segundo plano');
-      } catch (e) {
-        await fallo('Abrir una causa', e);
-        return;
-      }
-      if (!vivo()) return;
-      fr = crearMarco();
-      try {
-        await esperarCarga(fr, () => { fr.src = url; }, cualquiera);
-      } catch (e) {
-        await fallo('Página del expediente', e);
-        return;
-      }
-      if (!vivo()) return;
-      const de = fr.contentDocument;
-      const dx = datosExpediente(de);
-      anotar('Datos del expediente', !!dx.exp, !dx.exp ? 'no se encuentra "Expediente:" en los datos generales' : dx.car ? 'se leen el número y la carátula' : 'se lee el número, pero no la carátula');
-      // Las otras solapas del expediente, por el texto de su cabecera.
-      const solapas = Object.keys(PJN.solapasExp).filter((k) => cabezaSolapa(de, PJN.solapasExp[k]));
-      anotar('Solapas del expediente', solapas.length === 3,
-        solapas.length === 3
-          ? 'están Intervinientes, Vinculados y Recursos'
-          : (solapas.length ? 'falta ' + Object.keys(PJN.solapasExp).filter((k) => solapas.indexOf(k) < 0).map((k) => PJN.solapasExp[k]).join(', ')
-            : 'no se encuentra ninguna de las tres cabeceras donde el PJN las ponía'));
-      const ta = tablaActuaciones(de);
-      const acts = actuacionesDe(de, false);
-      anotar('Tabla de actuaciones', !!ta, ta ? (acts.length ? plural(acts.length, 'actuación', 'actuaciones') + ' con PDF en la primera página' : 'está, sin actuaciones con PDF en la primera página') : 'no se encuentra la tabla con "Fecha" y "Tipo" en el encabezado');
-      if (acts.length) {
-        const conFecha = acts.some((a) => esFecha(a.fecha));
-        const conTipo = acts.some((a) => a.tipo);
-        const rotulo = acts.some((a) => /:/.test(a.fojas));
-        anotar('Columnas de las actuaciones', conFecha && conTipo && !rotulo,
-          !conFecha ? 'la fecha no se lee como día/mes/año' : !conTipo ? 'el tipo de actuación viene vacío' : rotulo ? 'aparecen rótulos pegados a los valores: el PJN cambió cómo los marca' : 'fecha, tipo de actuación, descripción y fojas se leen');
-        // Hasta tres actuaciones: alguna puede no tener un PDF de verdad.
-        const n = Math.min(3, acts.length);
-        let pdf = null;
-        // La revisión prueba a propósito actuaciones que pueden no tener
-        // documento, así que sus fallas no van al registro: lo llenarían de
-        // entradas que no corresponden a un problema real.
-        for (let i = 0; i < n && vivo() && !(pdf && (pdf.buf || pdf.vencida)); i++) pdf = await traerPDF(acts[i].url, { mudo: true });
-        if (pdf && pdf.vencida) anotar('Descargar un PDF', false, 'la sesión del PJN venció en medio de la revisión', 'venció');
-        else if (pdf && pdf.buf) anotar('Descargar un PDF', true, 'llega un PDF de ' + Math.max(1, Math.round(pdf.buf.byteLength / 1024)) + ' KB');
-        else anotar('Descargar un PDF', false, 'no llegó un PDF de ' + (n === 1 ? 'la actuación probada' : 'ninguna de las ' + n + ' actuaciones probadas'));
-      } else if (ta) {
-        anotar('Columnas de las actuaciones', null, 'no hay actuaciones con PDF en la primera página para mirarlas');
-        anotar('Descargar un PDF', null, 'no hay actuaciones con PDF en la primera página para probar');
-      }
-      // Lo único del mapa que la revisión no mira sola: el formulario de
-      // Notificaciones. Abrirlo sería abrir una cédula nueva, así que se
-      // comprueba al usar Dejar cédula, que avisa en qué paso se quedó.
-      anotar('Formulario de cédula', null, 'no se prueba solo: se comprueba al dejar una cédula, y el cartel dice si el formulario cambió');
+      await esperarCarga(R.fr, () => { R.fr.src = RUTA.fav; }, () => true);
+      const df = R.fr.contentDocument;
+      const esFav = tipoLista(df) === 'fav', seLee = !!tablaDe(df) || diceSinCausas(df);
+      R.anotar('Lista de Favoritos', esFav && seLee, esFav && seLee ? 'se abre y se lee' : (!esFav ? 'se abre, pero no aparece el título "Lista de Expedientes Favoritos"' : 'se abre, pero no se encuentra su tabla'));
     } catch (e) {
-      await fallo('Revisión', e);
+      await R.fallo('Lista de Favoritos', e);
+      if (R.esVencida(e)) return false;
+    }
+    R.soltar();
+    return R.vivo();
+  }
+  // Escritos, Notificaciones, DEOX y la Guía: se abren en segundo plano y se
+  // les pide una lista corta, de la última semana. Solo lectura.
+  async function pasoUnaBandeja(R, v) {
+    const E = EXT[v], D = BANDEJAS[v];
+    try {
+      const ruta = D.ruta + '?bandeja=' + D.opciones[0][0] + '&fechaDesde=' + fechaAPI(isoHace(7)) + '&fechaHasta=' + fechaAPI(hoyISO());
+      const r = await pedirPuente(E.app, { op: 'lista', ruta, tope: 1, porPagina: 5 });
+      const items = r && Array.isArray(r.items) ? r.items : [];
+      const f = items.length ? D.fila(items[0], D.opciones[0][0]) : null;
+      if (!f) R.anotar(E.nombre, true, 'responde con la misma cuenta (no hay elementos de la última semana para mirar los datos)');
+      else R.anotar(E.nombre, !!(f.exp && f.fecha), f.exp && f.fecha ? 'responde con la misma cuenta, y se leen el expediente y la fecha' : 'responde, pero no se leen ' + (f.exp ? 'la fecha' : 'el expediente') + ': puede haber cambiado la forma de los datos');
+    } catch (e) {
+      R.anotar(E.nombre, false, String(e && e.message ? e.message : e));
+    }
+  }
+  async function pasoBandejas(R) {
+    for (const v of ['escr', 'notif', 'deox']) {
+      if (!R.vivo()) return false;
+      await pasoUnaBandeja(R, v);
+    }
+    return R.vivo();
+  }
+  async function pasoGuia(R) {
+    try {
+      const g = await pedirPuente('guia', { op: 'json', ruta: rutaGuia('guia-inicio') });
+      const ok = !!(g && g.dependencia && Array.isArray(g.subDependencias) && g.subDependencias.length);
+      R.anotar('Guía judicial', ok, ok ? 'responde y trae su índice' : 'responde, pero cambió la forma de los datos');
+    } catch (e) {
+      R.anotar('Guía judicial', false, String(e && e.message ? e.message : e));
+    }
+    return R.vivo();
+  }
+  // Un expediente: abrirlo, sus datos, sus actuaciones y un PDF. Se prueba
+  // con una causa en trámite ya leída, mejor de la primera página.
+  async function pasoAbrirUnaCausa(R) {
+    const leidas = (DATOS.rel && DATOS.rel.causas) || [];
+    const causa = leidas.find((c) => c.tramite && R.primeras.has(c.exp)) || leidas.find((c) => c.tramite);
+    if (!causa) { R.anotar('Abrir una causa', null, 'no hay causas en trámite leídas en Mis causas para probar'); return false; }
+    let url;
+    try {
+      // Sin reusar el marco de trabajo que haya quedado de antes: la revisión
+      // tiene que abrir la lista de nuevo y no mirar una copia vieja. Va en su
+      // propio turno porque conMarco no se puede anidar.
+      await conMarco(() => { soltarMarcoTrabajo(); });
+      url = await direccionDe(causa.exp, 'ojo', () => { /* sin avisos */ });
+      R.anotar('Abrir una causa', true, 'se abre en segundo plano');
+    } catch (e) {
+      await R.fallo('Abrir una causa', e);
+      return false;
+    }
+    if (!R.vivo()) return false;
+    if (!await R.abrirMarco('Página del expediente', url)) return false;
+    return R.vivo();
+  }
+  function pasoDatosYSolapasDelExpediente(R) {
+    const de = R.fr.contentDocument;
+    const dx = datosExpediente(de);
+    R.anotar('Datos del expediente', !!dx.exp, !dx.exp ? 'no se encuentra "Expediente:" en los datos generales' : dx.car ? 'se leen el número y la carátula' : 'se lee el número, pero no la carátula');
+    // Las otras solapas del expediente, por el texto de su cabecera.
+    const solapas = Object.keys(PJN.solapasExp).filter((k) => cabezaSolapa(de, PJN.solapasExp[k]));
+    R.anotar('Solapas del expediente', solapas.length === 3,
+      solapas.length === 3
+        ? 'están Intervinientes, Vinculados y Recursos'
+        : (solapas.length ? 'falta ' + Object.keys(PJN.solapasExp).filter((k) => solapas.indexOf(k) < 0).map((k) => PJN.solapasExp[k]).join(', ')
+          : 'no se encuentra ninguna de las tres cabeceras donde el PJN las ponía'));
+    return true;
+  }
+  async function pasoActuacionesYPDF(R) {
+    const de = R.fr.contentDocument;
+    const ta = tablaActuaciones(de);
+    const acts = actuacionesDe(de, false);
+    R.anotar('Tabla de actuaciones', !!ta, ta ? (acts.length ? plural(acts.length, 'actuación', 'actuaciones') + ' con PDF en la primera página' : 'está, sin actuaciones con PDF en la primera página') : 'no se encuentra la tabla con "Fecha" y "Tipo" en el encabezado');
+    if (!acts.length) {
+      if (ta) {
+        R.anotar('Columnas de las actuaciones', null, 'no hay actuaciones con PDF en la primera página para mirarlas');
+        R.anotar('Descargar un PDF', null, 'no hay actuaciones con PDF en la primera página para probar');
+      }
+      return true;
+    }
+    const conFecha = acts.some((a) => esFechaPJN(a.fecha));
+    const conTipo = acts.some((a) => a.tipo);
+    const rotulo = acts.some((a) => /:/.test(a.fojas));
+    R.anotar('Columnas de las actuaciones', conFecha && conTipo && !rotulo,
+      !conFecha ? 'la fecha no se lee como día/mes/año' : !conTipo ? 'el tipo de actuación viene vacío' : rotulo ? 'aparecen rótulos pegados a los valores: el PJN cambió cómo los marca' : 'fecha, tipo de actuación, descripción y fojas se leen');
+    // Hasta tres actuaciones: alguna puede no tener un PDF de verdad.
+    const n = Math.min(3, acts.length);
+    let pdf = null;
+    // La revisión prueba a propósito actuaciones que pueden no tener
+    // documento, así que sus fallas no van al registro: lo llenarían de
+    // entradas que no corresponden a un problema real.
+    for (let i = 0; i < n && R.vivo() && !(pdf && (pdf.buf || pdf.vencida)); i++) pdf = await traerPDF(acts[i].url, { mudo: true });
+    if (pdf && pdf.vencida) R.anotar('Descargar un PDF', false, 'la sesión del PJN venció en medio de la revisión', 'venció');
+    else if (pdf && pdf.buf) R.anotar('Descargar un PDF', true, 'llega un PDF de ' + Math.max(1, Math.round(pdf.buf.byteLength / 1024)) + ' KB');
+    else R.anotar('Descargar un PDF', false, 'no llegó un PDF de ' + (n === 1 ? 'la actuación probada' : 'ninguna de las ' + n + ' actuaciones probadas'));
+    return true;
+  }
+  function pasoFormularioDeCedula(R) {
+    // Lo único del mapa que la revisión no mira sola: el formulario de
+    // Notificaciones. Abrirlo sería abrir una cédula nueva, así que se
+    // comprueba al usar Dejar cédula, que avisa en qué paso se quedó.
+    R.anotar('Formulario de cédula', null, 'no se prueba solo: se comprueba al dejar una cédula, y el cartel dice si el formulario cambió');
+    return true;
+  }
+
+  const PASOS_DE_LA_REVISION = [
+    pasoConexionYSesion, pasoListaDeRelacionados, pasoTablaDeCausas, pasoColumnasDeLaLista, pasoPaginadorYControles, pasoEnlacesDeLaFila,
+    pasoCuentaYDejarNota, pasoFavoritos, pasoBandejas, pasoGuia, pasoAbrirUnaCausa, pasoDatosYSolapasDelExpediente, pasoActuacionesYPDF, pasoFormularioDeCedula
+  ];
+
+  async function revisarPJN() {
+    if (DIAG.estado === 'corriendo') { pintarDiag(); return; }
+    if (bloqueoNota()) { avisar('Hay un lote de notas en curso: revisá el PJN cuando termine.', true); return; }
+    const R = crearRevision(++diagN);
+    DIAG.estado = 'corriendo';
+    DIAG.items = [];
+    DIAG.fecha = Date.now();
+    pintarDiag();
+    try {
+      for (const paso of PASOS_DE_LA_REVISION) {
+        if (!R.vivo()) return;
+        if (!await paso(R)) return;
+      }
+    } catch (e) {
+      await R.fallo('Revisión', e);
     } finally {
-      soltar();
-      if (vivo()) { DIAG.estado = 'listo'; pintarDiag(); }
+      R.soltar();
+      if (R.vivo()) { DIAG.estado = 'listo'; pintarDiag(); }
     }
   }
 
@@ -9004,7 +9393,8 @@
   if (location.hostname === 'pruebas.supjn.invalid' && typeof window.__SUPJN_PRUEBAS__ === 'function') {
     window.__SUPJN_PRUEBAS__({
       limpio, norm, clave, fueroDe, numFecha, fechaPareja, ordenExp, isoACorta, plural, lasN, mensajeDe,
-      mismoExpediente, textoVisible, sinRotulo, esPDF, horaDePDF, sinNumeroDeCausa, partesDeCaratula, notas: () => NOTAS, normalizarNotas, normalizarMarcas, validarDatos,
+      mismoExpediente, leerCartel, resultadoDelCartel, diceQueHayNota, diceFalla, tramoDelCartel, expedienteDelCartel,
+      dudosasDeHoy, textoVisible, sinRotulo, esPDF, horaDePDF, sinNumeroDeCausa, partesDeCaratula, notas: () => NOTAS, normalizarNotas, normalizarMarcas, validarDatos,
       enterosExactos, anchosEncuadrados, repartirEncuadre, minCol, anchoDe, columnasVisibles, CFG, COLS_DEF, COLS_ACT_DEF, BLOQUE_DESCARGAS, TOPE_DESCARGAS,
       importarMarcas, marcas: () => MARCAS, valorOrdenAct, esMiTurno, resNota, acotarZoom, zoomVecino,
       // La carpeta de respaldo: el banco instala una carpeta simulada para
